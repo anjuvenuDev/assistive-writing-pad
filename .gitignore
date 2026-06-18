@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local environment
+.env
+.env.*
+
+# Model artifacts are documented but not committed by default.
+models/*
+!models/README.md
+
+# Dataset drops can be large; commit only curated examples.
+data/*
+!data/examples/
+!data/examples/**
+
+# Local alternate git directory used in this sandbox.
+.git-local/
