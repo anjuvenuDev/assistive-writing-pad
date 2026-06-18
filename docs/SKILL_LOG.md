@@ -14,8 +14,8 @@ Build a real-time handwriting recognition and intelligent correction system for 
 
 ## Current Phase Status
 
-- Phase: 3 - Stroke and image preprocessing
-- Status: completed
+- Phase: 4 - Offline handwriting recognition baseline
+- Status: blocked pending model artifact or approved model download
 - Completed this session:
   - Reviewed repository state and confirmed the GitHub remote has no refs yet.
   - Created project roadmap in `docs/ROADMAP.md`.
@@ -35,6 +35,8 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added crop-to-content, square padding, nearest-neighbor resizing, and unit normalization helpers.
   - Added `StrokePreprocessor` that outputs 28x28 float32 model images.
   - Added preprocessing tests for empty input, variable-size writing, pressure-sensitive rendering, simulator compatibility, and invalid resize config.
+  - Checked `/home/anj/Downloads` for existing model artifacts: none found with `.pt`, `.pth`, `.onnx`, `.h5`, `.tflite`, or `.pkl` extensions.
+  - Reviewed public pretrained HTR direction. `microsoft/trocr-small-handwritten` is IAM-finetuned and suitable for single text-line OCR experiments, but it needs performance validation and likely optimization before Raspberry Pi use.
 - Not yet implemented:
   - Real handwriting recognition model loading
   - Full spelling/grammar/semantic correction models
@@ -56,6 +58,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - Stroke recording uses versioned JSON so captured samples can become repeatable evaluation fixtures.
 - Preprocessing currently uses numpy-only image operations to keep Raspberry Pi migration simple.
 - The first model input target is 28x28 grayscale to remain compatible with the existing EMNIST/CNN baseline.
+- Phase 4 should prefer an existing EMNIST/CNN artifact if available because it aligns with the review baseline and 28x28 preprocessing. If no baseline artifact is available, use an adapter-first path for TrOCR/ONNX experiments without making it the final Pi model.
 
 ## Known Limitations And Risks
 
@@ -132,6 +135,15 @@ Phase 3:
   - Recognition accuracy not measured yet because no real model is connected.
   - Pressure-sensitive rendering is verified structurally, not clinically validated.
 
+Phase 4:
+
+- No recognition accuracy measured.
+- Blocker: no local pretrained recognition artifact is available yet.
+- Candidate paths:
+  - Preferred immediate path: use the existing EMNIST/CNN baseline weights from the earlier 80% implementation if they can be provided.
+  - Research path: download and benchmark `microsoft/trocr-small-handwritten` for line-image OCR on laptop only, then decide whether to export/quantize or replace for Raspberry Pi.
+  - Pi path: ONNX/TFLite recognizer adapter with small CNN/CRNN model.
+
 Planned metrics:
 
 - Character accuracy
@@ -144,7 +156,7 @@ Planned metrics:
 
 ## Next Session Focus
 
-1. Phase 4: add offline handwriting recognition baseline.
-2. Add a recognizer adapter interface for image-based models.
-3. Select the first portable model path: existing EMNIST/CNN artifact if available, otherwise ONNX/PyTorch demo adapter.
+1. Obtain or approve download of the first recognition model artifact.
+2. Add an image-based recognizer adapter around that artifact.
+3. Add model metadata under `models/README.md` or a manifest.
 4. Add recognition evaluation hooks for character accuracy and WER.
