@@ -14,7 +14,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
 
 ## Current Phase Status
 
-- Phase: 2 - Tablet and simulator input capture
+- Phase: 3 - Stroke and image preprocessing
 - Status: completed
 - Completed this session:
   - Reviewed repository state and confirmed the GitHub remote has no refs yet.
@@ -31,13 +31,17 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added Huion/Linux input device probe with lazy `evdev` import.
   - Added minimal Huion event reader that maps ABS_X, ABS_Y, and ABS_PRESSURE into `StrokePoint`.
   - Added capture tests for simulator output, stroke replay, schema validation, and Huion device detection.
+  - Added CPU-only stroke rasterization to grayscale numpy arrays.
+  - Added crop-to-content, square padding, nearest-neighbor resizing, and unit normalization helpers.
+  - Added `StrokePreprocessor` that outputs 28x28 float32 model images.
+  - Added preprocessing tests for empty input, variable-size writing, pressure-sensitive rendering, simulator compatibility, and invalid resize config.
 - Not yet implemented:
-  - Stroke/image preprocessing
   - Real handwriting recognition model loading
   - Full spelling/grammar/semantic correction models
   - Real-time UI
   - Evaluation datasets and benchmark runner
   - Hardware-validated Huion coordinate scaling and pressure normalization
+  - Word and line segmentation
 
 ## Technical Decisions
 
@@ -50,6 +54,8 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - In this sandbox, `.git` is a read-only empty placeholder. Local commits use `.git-local` with `git --git-dir=.git-local --work-tree=.`.
 - Hardware dependencies are imported lazily so simulator, tests, and non-Linux development do not require `evdev`.
 - Stroke recording uses versioned JSON so captured samples can become repeatable evaluation fixtures.
+- Preprocessing currently uses numpy-only image operations to keep Raspberry Pi migration simple.
+- The first model input target is 28x28 grayscale to remain compatible with the existing EMNIST/CNN baseline.
 
 ## Known Limitations And Risks
 
@@ -114,6 +120,18 @@ Phase 2:
   - `evdev` is optional and lazy-loaded.
   - Stroke JSON uses standard library only.
 
+Phase 3:
+
+- Unit tests: 13 passed.
+- Preprocessing metrics:
+  - Output shape: 28x28.
+  - Output dtype: float32.
+  - Output range: 0.0 to 1.0.
+  - Empty input returns a blank 28x28 image.
+- Accuracy impact:
+  - Recognition accuracy not measured yet because no real model is connected.
+  - Pressure-sensitive rendering is verified structurally, not clinically validated.
+
 Planned metrics:
 
 - Character accuracy
@@ -126,7 +144,7 @@ Planned metrics:
 
 ## Next Session Focus
 
-1. Phase 3: implement stroke and image preprocessing.
-2. Add rasterization from `StrokePoint` to grayscale image arrays.
-3. Add bounding-box crop, padding, resizing, and normalization.
-4. Add tests for empty input, variable-size writing, and pressure-aware rendering.
+1. Phase 4: add offline handwriting recognition baseline.
+2. Add a recognizer adapter interface for image-based models.
+3. Select the first portable model path: existing EMNIST/CNN artifact if available, otherwise ONNX/PyTorch demo adapter.
+4. Add recognition evaluation hooks for character accuracy and WER.
