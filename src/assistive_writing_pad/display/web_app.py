@@ -174,9 +174,9 @@ HTML = """<!doctype html>
       </div>
       <textarea id="recognized" spellcheck="false"></textarea>
       <div class="setup">
-        Pretrained OCR uses <code>microsoft/trocr-small-handwritten</code>.
-        If recognition reports missing dependencies, create a Python 3.10 environment and run
-        <code>pip install -e ".[models]"</code>.
+        Pretrained OCR uses <code>microsoft/trocr-base-handwritten</code> with line-aware
+        segmentation. If recognition reports missing dependencies, create a Python 3.10
+        environment and run <code>scripts/setup_model_env.sh</code>.
       </div>
     </section>
   </main>
@@ -186,7 +186,8 @@ HTML = """<!doctype html>
     const statusEl = document.getElementById("status");
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
-    let points = [];
+    let strokes = [];
+    let currentStroke = [];
     let drawing = false;
     let last = null;
     let startedAt = 0;
@@ -221,8 +222,9 @@ HTML = """<!doctype html>
     function start(event) {
       drawing = true;
       startedAt = performance.now();
+      currentStroke = [];
       last = canvasPoint(event);
-      points.push(last);
+      currentStroke.push(last);
       canvas.setPointerCapture(event.pointerId);
       event.preventDefault();
     }
@@ -234,7 +236,7 @@ HTML = """<!doctype html>
       ctx.moveTo(last.x, last.y);
       ctx.lineTo(point.x, point.y);
       ctx.stroke();
-      points.push(point);
+      currentStroke.push(point);
       last = point;
       event.preventDefault();
     }
@@ -242,7 +244,9 @@ HTML = """<!doctype html>
     function finish(event) {
       if (!drawing) return;
       drawing = false;
-      points.push(canvasPoint(event));
+      currentStroke.push(canvasPoint(event));
+      strokes.push(currentStroke);
+      currentStroke = [];
       last = null;
       scheduleRecognition();
       event.preventDefault();
@@ -254,7 +258,7 @@ HTML = """<!doctype html>
     }
 
     async function recognize() {
-      if (!points.length) {
+      if (!strokes.length) {
         statusEl.textContent = "Write on the pad first.";
         return;
       }
@@ -264,7 +268,7 @@ HTML = """<!doctype html>
         const response = await fetch("/api/recognize", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({points})
+          body: JSON.stringify({strokes})
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
@@ -277,7 +281,8 @@ HTML = """<!doctype html>
     }
 
     function clearInk() {
-      points = [];
+      strokes = [];
+      currentStroke = [];
       ctx.fillStyle = "#ffffff";
       const rect = canvas.getBoundingClientRect();
       ctx.fillRect(0, 0, rect.width, rect.height);
@@ -311,8 +316,8 @@ class RecognitionService:
         self.recognizer = TrOCRHandwritingRecognizer()
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        points = points_from_payload(payload)
-        result = self.recognizer.recognize(points)
+        stroke_groups = stroke_groups_from_payload(payload)
+        result = self.recognizer.recognize_stroke_groups(stroke_groups)
         return {
             "text": result.text,
             "confidence": result.confidence,
@@ -321,24 +326,36 @@ class RecognitionService:
         }
 
 
-def points_from_payload(payload: Dict[str, Any]) -> List[StrokePoint]:
-    raw_points = payload.get("points")
-    if not isinstance(raw_points, list):
-        raise ValueError("request must contain a points list")
+def stroke_groups_from_payload(payload: Dict[str, Any]) -> List[List[StrokePoint]]:
+    raw_strokes = payload.get("strokes")
+    if raw_strokes is None:
+        raw_points = payload.get("points")
+        if isinstance(raw_points, list):
+            raw_strokes = [raw_points]
+        else:
+            raise ValueError("request must contain a strokes list")
 
-    points = []
-    for item in raw_points:
-        if not isinstance(item, dict):
-            raise ValueError("each point must be an object")
-        points.append(
-            StrokePoint(
-                x=float(item["x"]),
-                y=float(item["y"]),
-                timestamp_ms=int(item.get("timestamp_ms", 0)),
-                pressure=float(item.get("pressure", 1.0)),
+    if not isinstance(raw_strokes, list):
+        raise ValueError("request must contain a strokes list")
+
+    stroke_groups: List[List[StrokePoint]] = []
+    for stroke in raw_strokes:
+        if not isinstance(stroke, list):
+            raise ValueError("each stroke must be a list of points")
+        points: List[StrokePoint] = []
+        for item in stroke:
+            if not isinstance(item, dict):
+                raise ValueError("each point must be an object")
+            points.append(
+                StrokePoint(
+                    x=float(item["x"]),
+                    y=float(item["y"]),
+                    timestamp_ms=int(item.get("timestamp_ms", 0)),
+                    pressure=float(item.get("pressure", 1.0)),
+                )
             )
-        )
-    return points
+        stroke_groups.append(points)
+    return stroke_groups
 
 
 def make_handler(service: RecognitionService):

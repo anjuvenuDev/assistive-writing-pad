@@ -40,8 +40,9 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added a clean Tkinter writing-pad interface with a canvas on the left and recognized text on the right.
   - Added live stroke reflection while writing with mouse/tablet-style pointer input.
   - Added recognition after stroke release.
-  - Added pretrained TrOCR handwritten OCR adapter using `microsoft/trocr-small-handwritten`.
+  - Added pretrained TrOCR handwritten OCR adapter using `microsoft/trocr-base-handwritten`.
   - Added automatic whole-ink recognition after a short pause and a `Recognize Now` button.
+  - Added line-aware stroke grouping so the backend recognizes separate writing lines independently.
   - Kept the local template recognizer only as fallback/debug support.
   - Added numpy RGB rendering for TrOCR input, avoiding a hard Pillow dependency in tests.
   - Added UI controls for clear ink, space, backspace, clear text, and saving a taught character sample.
@@ -61,7 +62,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Final correction-focused UI with highlighted corrected text
   - Evaluation datasets and benchmark runner
   - Hardware-validated Huion coordinate scaling and pressure normalization
-  - Word and line segmentation
+  - Word-level segmentation
 
 ## Technical Decisions
 
@@ -76,9 +77,9 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - Stroke recording uses versioned JSON so captured samples can become repeatable evaluation fixtures.
 - Preprocessing currently uses numpy-only image operations to keep Raspberry Pi migration simple.
 - The first model input target is 28x28 grayscale to remain compatible with the existing EMNIST/CNN baseline.
-- Main recognition path now uses a pretrained handwriting OCR model, not manual alphabet entry.
-- The template recognizer is not the main recognizer. It is fallback/debug support and a way to collect user-specific examples if needed.
-- TrOCR is suitable for handwritten line OCR experiments, but Raspberry Pi latency must be measured before calling it production-ready.
+  - Main recognition path now uses a pretrained handwriting OCR model, not manual alphabet entry.
+  - The template recognizer is not the main recognizer. It is fallback/debug support and a way to collect user-specific examples if needed.
+  - TrOCR is suitable for handwritten line OCR experiments, but Raspberry Pi latency must be measured before calling it production-ready.
 - CPU-only PyTorch must be installed before project model extras. The setup script handles this.
 
 ## Known Limitations And Risks
@@ -179,19 +180,20 @@ Phase 4B:
 
 - Unit tests: 20 passed in the Python 3.10 virtualenv.
 - Main recognizer:
-  - `microsoft/trocr-small-handwritten`
+  - `microsoft/trocr-base-handwritten`
   - Lazy-loaded so the UI opens even before model dependencies are installed.
   - Requires CPU PyTorch plus `pip install -e ".[models]"`; use `scripts/setup_model_env.sh`.
   - Model weights have been downloaded and loaded successfully in `.venv`.
 - Accuracy:
   - Rendering path verified with tests.
-  - One simulated-stroke inference returned `MOND` with confidence `0.362`; this only verifies wiring, not accuracy, because the simulator does not produce real handwriting.
+  - One simulated-stroke inference returned `0 0` on a two-line synthetic payload with confidence `0.555`; this only verifies wiring, not accuracy, because the simulator does not produce real handwriting.
 - Limitations:
   - First recognition may be slow because the model is downloaded and loaded.
   - Browser UI now avoids the Tkinter display issue reproduced in this environment.
   - Recognition currently runs synchronously on the server; a background worker should be added if laptop inference blocks interaction.
   - TrOCR performance on Raspberry Pi 4 is unknown and likely needs quantization or replacement with a smaller model.
   - Generic PyPI `torch` pulls CUDA dependencies on this machine, so CPU-only PyTorch must be installed from the PyTorch CPU wheel index.
+  - Recognition is line-aware now, but word-level segmentation and post-correction remain future work.
 
 Planned metrics:
 

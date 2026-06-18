@@ -57,7 +57,7 @@ preferred path because it works more reliably across laptop, tablet, and
 Raspberry Pi setups.
 
 The main recognizer is the pretrained handwritten OCR model
-`microsoft/trocr-small-handwritten`. Manual template learning is only fallback
+`microsoft/trocr-base-handwritten`. Manual template learning is only fallback
 support, not the expected user workflow.
 
 Install model dependencies before using pretrained recognition. Use the setup

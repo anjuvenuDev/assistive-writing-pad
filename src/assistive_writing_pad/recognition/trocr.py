@@ -1,20 +1,22 @@
 """Pretrained TrOCR handwritten text recognizer.
 
-The default checkpoint is Microsoft's IAM-finetuned handwritten TrOCR model.
-Imports are lazy so the rest of the application remains usable before model
-dependencies are installed.
+The default checkpoint is Microsoft's IAM-finetuned handwritten TrOCR base
+model. Imports are lazy so the rest of the application remains usable before
+model dependencies are installed.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import numpy as np
 
 from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
-DEFAULT_TROCR_MODEL = "microsoft/trocr-small-handwritten"
+DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-base-handwritten")
 
 
 class RecognitionUnavailable(RuntimeError):
@@ -61,6 +63,54 @@ class TrOCRHandwritingRecognizer:
             metadata={"recognizer": "trocr", "model": self.model_name},
         )
 
+    def recognize_stroke_groups(self, stroke_groups: Sequence[Sequence[StrokePoint]]) -> RecognitionResult:
+        if not stroke_groups:
+            return RecognitionResult(
+                text="",
+                confidence=0.0,
+                metadata={"recognizer": "trocr", "reason": "empty_strokes"},
+            )
+
+        self._ensure_loaded()
+        lines = segment_strokes_into_lines(stroke_groups)
+        line_results = []
+        line_texts = []
+        confidences = []
+
+        for line_index, line_groups in enumerate(lines):
+            image = render_stroke_groups_for_trocr(line_groups)
+            inputs = self._processor(images=image, return_tensors="pt")
+            with self._torch.no_grad():
+                generated = self._model.generate(
+                    inputs.pixel_values,
+                    max_new_tokens=self.max_new_tokens,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                )
+            text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+            confidence = _generation_confidence(generated, self._torch)
+            line_texts.append(text.strip())
+            confidences.append(confidence)
+            line_results.append(
+                {
+                    "line_index": line_index,
+                    "text": text.strip(),
+                    "confidence": confidence,
+                    "stroke_groups": len(line_groups),
+                }
+            )
+
+        return RecognitionResult(
+            text="\n".join(text for text in line_texts if text),
+            confidence=float(np.mean(confidences)) if confidences else 0.0,
+            metadata={
+                "recognizer": "trocr",
+                "model": self.model_name,
+                "lines": str(len(lines)),
+                "line_results": json.dumps(line_results),
+            },
+        )
+
     def _ensure_loaded(self) -> None:
         if self._processor is not None and self._model is not None:
             return
@@ -104,16 +154,85 @@ def render_strokes_for_trocr(
     return image
 
 
+def render_stroke_groups_for_trocr(
+    stroke_groups: Sequence[Sequence[StrokePoint]],
+    size: tuple = (384, 128),
+    padding: int = 14,
+) -> np.ndarray:
+    """Render multiple pen strokes into one OCR image without joining stroke gaps."""
+
+    flattened = [point for stroke in stroke_groups for point in stroke]
+    width, height = size
+    image = np.full((height, width, 3), 255, dtype=np.uint8)
+    if not flattened:
+        return image
+
+    bounds = _bounds(flattened)
+    all_points = _scale_points(flattened, width, height, padding, bounds=bounds)
+    point_lookup = iter(all_points)
+
+    for stroke in stroke_groups:
+        if not stroke:
+            continue
+        scaled = [next(point_lookup) for _ in stroke]
+        if len(scaled) == 1:
+            x, y = scaled[0]
+            _draw_dot(image, x, y, radius=2)
+            continue
+        for start, end in zip(scaled, scaled[1:]):
+            _draw_line(image, start, end, radius=2)
+
+    return image
+
+
+def segment_strokes_into_lines(
+    stroke_groups: Sequence[Sequence[StrokePoint]],
+    gap_threshold: float = 56.0,
+) -> List[List[Sequence[StrokePoint]]]:
+    """Cluster stroke groups by vertical position into reading lines."""
+
+    strokes_with_centers = []
+    for stroke in stroke_groups:
+        if not stroke:
+            continue
+        ys = [point.y for point in stroke]
+        xs = [point.x for point in stroke]
+        strokes_with_centers.append(
+            {
+                "stroke": stroke,
+                "center_y": float(np.mean(ys)),
+                "center_x": float(np.mean(xs)),
+            }
+        )
+
+    if not strokes_with_centers:
+        return []
+
+    strokes_with_centers.sort(key=lambda item: (item["center_y"], item["center_x"]))
+    lines: List[List[Sequence[StrokePoint]]] = [[strokes_with_centers[0]["stroke"]]]
+    line_centers = [strokes_with_centers[0]["center_y"]]
+
+    for item in strokes_with_centers[1:]:
+        center_y = item["center_y"]
+        if abs(center_y - line_centers[-1]) > gap_threshold:
+            lines.append([item["stroke"]])
+            line_centers.append(center_y)
+            continue
+
+        lines[-1].append(item["stroke"])
+        line_centers[-1] = float(np.mean([line_centers[-1], center_y]))
+
+    return lines
+
+
 def _scale_points(
     strokes: Sequence[StrokePoint],
     width: int,
     height: int,
     padding: int,
+    bounds: Optional[tuple] = None,
 ) -> list:
-    xs = [point.x for point in strokes]
-    ys = [point.y for point in strokes]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
+    min_x, max_x, min_y, max_y = bounds or _bounds(strokes)
 
     x_range = max(max_x - min_x, 1.0)
     y_range = max(max_y - min_y, 1.0)
@@ -129,6 +248,12 @@ def _scale_points(
         y = int(round((point.y - min_y) * scale + y_offset))
         points.append((max(0, min(width - 1, x)), max(0, min(height - 1, y))))
     return points
+
+
+def _bounds(strokes: Sequence[StrokePoint]) -> tuple:
+    xs = [point.x for point in strokes]
+    ys = [point.y for point in strokes]
+    return min(xs), max(xs), min(ys), max(ys)
 
 
 def _draw_line(image: np.ndarray, start: tuple, end: tuple, radius: int) -> None:
