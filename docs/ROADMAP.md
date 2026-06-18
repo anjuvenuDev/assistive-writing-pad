@@ -59,20 +59,25 @@
   - Generated images match expected model input shape: met with 28x28 output
   - Unit tests cover empty strokes and oversized writing: met
 
-## Phase 4 - Offline Handwriting Recognition Baseline
+## Phase 4 - From-Scratch Handwriting Recognition Baseline
 
-- Timeline: 1-2 weeks
+- Timeline: in progress, first UI/template baseline completed on 2026-06-18
 - Complexity: high
 - Dependencies: Phase 3
 - Deliverables:
-  - Local recognizer adapter
-  - Pretrained or existing EMNIST/IAM/CVL-compatible model loading
-  - Character or word confidence scores
-  - Confidence threshold behavior at 0.85
+  - Local recognizer adapter: completed through template recognizer
+  - Clean handwriting interface: completed
+  - Stroke capture reflected on screen: completed
+  - Recognition after stroke release: completed
+  - From-scratch sample learning: completed
+  - High-accuracy trained classifier: pending
+  - Character or word confidence scores: initial confidence completed
+  - Confidence threshold behavior at 0.85: completed in core pipeline; UI currently uses 0.60 for template feedback
 - Success criteria:
-  - Offline recognition works without network
-  - Recognition output includes text and confidence metadata
-  - Baseline WER and character accuracy are measured
+  - Offline recognition works without network: met
+  - Recognition output includes text and confidence metadata: met
+  - User can write on the pad and see ink plus recognized text side by side: met
+  - Baseline character accuracy is measured on collected samples: pending
 
 ## Phase 5 - Spell Correction And Dysgraphia Error Patterns
 
