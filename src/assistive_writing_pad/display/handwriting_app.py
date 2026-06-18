@@ -8,6 +8,7 @@ from tkinter import ttk
 from typing import List, Optional
 
 from assistive_writing_pad.contracts import StrokePoint
+from assistive_writing_pad.recognition.trocr import RecognitionUnavailable, TrOCRHandwritingRecognizer
 from assistive_writing_pad.recognition.template import (
     DEFAULT_TEMPLATE_PATH,
     TemplateGlyphRecognizer,
@@ -23,7 +24,7 @@ MUTED = "#6b7280"
 
 
 class HandwritingApp:
-    """A first-pass writing pad UI with trainable local recognition."""
+    """Writing pad UI with pretrained recognition and local fallback learning."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -31,15 +32,17 @@ class HandwritingApp:
         self.root.geometry("1100x680")
         self.root.minsize(940, 560)
 
-        self.recognizer = TemplateGlyphRecognizer()
+        self.pretrained_recognizer = TrOCRHandwritingRecognizer()
+        self.template_recognizer = TemplateGlyphRecognizer()
         self.current_stroke: List[StrokePoint] = []
         self.last_stroke: List[StrokePoint] = []
         self.all_points: List[StrokePoint] = []
         self.stroke_started_at: Optional[float] = None
         self.last_x: Optional[float] = None
         self.last_y: Optional[float] = None
+        self.recognition_job: Optional[str] = None
         self.recognized_text = tk.StringVar(value="")
-        self.status = tk.StringVar(value=self._template_status())
+        self.status = tk.StringVar(value="Pretrained OCR ready to load on first recognition.")
         self.confidence = tk.StringVar(value="Confidence: -")
 
         self._configure_style()
@@ -95,8 +98,11 @@ class HandwritingApp:
         controls = ttk.Frame(canvas_panel, style="Panel.TFrame")
         controls.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         ttk.Button(controls, text="Clear Ink", command=self.clear_ink).pack(side=tk.LEFT)
-        ttk.Button(controls, text="Space", command=self.add_space).pack(side=tk.LEFT, padx=8)
-        ttk.Button(controls, text="Backspace", command=self.backspace).pack(side=tk.LEFT)
+        ttk.Button(controls, text="Recognize Now", command=self.recognize_all_ink).pack(
+            side=tk.LEFT, padx=8
+        )
+        ttk.Button(controls, text="Space", command=self.add_space).pack(side=tk.LEFT)
+        ttk.Button(controls, text="Backspace", command=self.backspace).pack(side=tk.LEFT, padx=8)
         ttk.Button(controls, text="Clear Text", command=self.clear_text).pack(side=tk.LEFT, padx=8)
 
         result_panel = ttk.Frame(body, style="Panel.TFrame", padding=14)
@@ -125,13 +131,13 @@ class HandwritingApp:
         self.text_box.grid(row=2, column=0, sticky="nsew")
         self._sync_text_box()
 
-        teach = ttk.Frame(result_panel, style="Panel.TFrame")
-        teach.grid(row=3, column=0, sticky="ew", pady=(14, 0))
-        teach.columnconfigure(1, weight=1)
-        ttk.Label(teach, text="Teach label").grid(row=0, column=0, sticky="w")
-        self.label_entry = ttk.Entry(teach)
+        fallback = ttk.Frame(result_panel, style="Panel.TFrame")
+        fallback.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        fallback.columnconfigure(1, weight=1)
+        ttk.Label(fallback, text="Fallback label").grid(row=0, column=0, sticky="w")
+        self.label_entry = ttk.Entry(fallback)
         self.label_entry.grid(row=0, column=1, sticky="ew", padx=8)
-        ttk.Button(teach, text="Save Sample", command=self.save_sample).grid(row=0, column=2)
+        ttk.Button(fallback, text="Save Template", command=self.save_sample).grid(row=0, column=2)
 
     def _bind_canvas(self) -> None:
         self.canvas.bind("<ButtonPress-1>", self._start_stroke)
@@ -168,7 +174,7 @@ class HandwritingApp:
         self.current_stroke = []
         self.last_x = None
         self.last_y = None
-        self._recognize_last_stroke()
+        self._schedule_recognition()
 
     def _add_point(self, event: tk.Event) -> None:
         started_at = self.stroke_started_at or time.monotonic()
@@ -177,27 +183,55 @@ class HandwritingApp:
             StrokePoint(x=float(event.x), y=float(event.y), timestamp_ms=timestamp_ms, pressure=1.0)
         )
 
-    def _recognize_last_stroke(self) -> None:
-        result = self.recognizer.recognize(self.last_stroke)
-        if result.metadata.get("reason") == "no_templates":
-            self.status.set("No taught samples yet. Write a character, enter its label, then save it.")
+    def _schedule_recognition(self) -> None:
+        if self.recognition_job is not None:
+            self.root.after_cancel(self.recognition_job)
+        self.recognition_job = self.root.after(700, self.recognize_all_ink)
+
+    def recognize_all_ink(self) -> None:
+        self.recognition_job = None
+        if not self.all_points:
+            self.status.set("Write on the pad to recognize handwriting.")
             self.confidence.set("Confidence: -")
             return
 
+        self.status.set("Recognizing handwriting...")
+        self.root.update_idletasks()
+        try:
+            result = self.pretrained_recognizer.recognize(self.all_points)
+        except RecognitionUnavailable as exc:
+            self.status.set(str(exc))
+            self._recognize_last_stroke_with_template()
+            return
+        except Exception as exc:
+            self.status.set(f"Pretrained OCR failed: {exc}")
+            self._recognize_last_stroke_with_template()
+            return
+
+        self.confidence.set(f"Confidence: {result.confidence:.2f}")
+        self.recognized_text.set(result.text)
+        self._sync_text_box()
+        if result.text:
+            self.status.set("Recognized handwriting with pretrained OCR.")
+        else:
+            self.status.set("Pretrained OCR returned no text. Try writing larger or clearer.")
+
+    def _recognize_last_stroke_with_template(self) -> None:
+        result = self.template_recognizer.recognize(self.last_stroke)
+        if result.metadata.get("reason") == "no_templates":
+            return
         self.confidence.set(f"Confidence: {result.confidence:.2f}")
         if result.text and result.confidence >= 0.60:
             self.recognized_text.set(self.recognized_text.get() + result.text)
             self._sync_text_box()
-            self.status.set(f"Recognized '{result.text}' from the last stroke.")
+            self.status.set(f"Fallback template recognized '{result.text}' from the last stroke.")
         elif result.text:
-            self.status.set(f"Low confidence for '{result.text}'. Teach more samples.")
-        else:
-            self.status.set("No recognizable stroke captured.")
+            self.status.set(f"Low fallback confidence for '{result.text}'.")
 
     def save_sample(self) -> None:
         label = self.label_entry.get()
         try:
-            sample = self.recognizer.learn(label, self.last_stroke)
+            sample = self.template_recognizer.learn(label, self.last_stroke)
         except ValueError as exc:
             self.status.set(str(exc))
             return
@@ -231,11 +265,11 @@ class HandwritingApp:
         self.text_box.configure(state=tk.DISABLED)
 
     def _template_status(self) -> str:
-        counts = count_samples_by_label(self.recognizer.store.samples)
+        counts = count_samples_by_label(self.template_recognizer.store.samples)
         if not counts:
             return f"Templates: 0 ({DEFAULT_TEMPLATE_PATH})"
         summary = ", ".join(f"{label}:{count}" for label, count in counts.items())
-        return f"Templates: {len(self.recognizer.store.samples)} ({summary})"
+        return f"Templates: {len(self.template_recognizer.store.samples)} ({summary})"
 
 
 def main() -> None:

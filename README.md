@@ -50,12 +50,27 @@ Run the first writing-pad interface:
 PYTHONPATH=src python -m assistive_writing_pad.display.handwriting_app
 ```
 
-The first recognizer is intentionally from scratch. It starts with no model and
-learns local templates from samples:
+The main recognizer is the pretrained handwritten OCR model
+`microsoft/trocr-small-handwritten`. Manual template learning is only fallback
+support, not the expected user workflow.
+
+Install model dependencies before using pretrained recognition:
+
+```bash
+pip install -e ".[models]"
+```
+
+The first run downloads the model from Hugging Face and can take time. After
+that, the UI runs it from the local cache.
+
+For best compatibility with PyTorch, use Python 3.9-3.11 for the model
+environment.
+
+Fallback template mode is still available for debugging:
 
 1. Write one character on the pad.
 2. Enter the correct label, for example `a`.
-3. Click `Save Sample`.
+3. Click `Save Template`.
 4. Write the character again to see recognized text update on the right.
 
 The saved templates live in `data/user_templates.json`, which is ignored by Git.

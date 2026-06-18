@@ -14,7 +14,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
 
 ## Current Phase Status
 
-- Phase: 4A - First handwriting interface and from-scratch recognition baseline
+- Phase: 4B - Pretrained handwriting OCR interface
 - Status: completed
 - Completed this session:
   - Reviewed repository state and confirmed the GitHub remote has no refs yet.
@@ -36,13 +36,16 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added `StrokePreprocessor` that outputs 28x28 float32 model images.
   - Added preprocessing tests for empty input, variable-size writing, pressure-sensitive rendering, simulator compatibility, and invalid resize config.
   - Checked `/home/anj/Downloads` for existing model artifacts: none found with `.pt`, `.pth`, `.onnx`, `.h5`, `.tflite`, or `.pkl` extensions.
-  - User clarified that there is no existing model and recognition must be built from scratch.
+  - User clarified that exhaustive manual template entry is not acceptable and the main path should use a predefined pretrained handwriting recognition model.
   - Added a clean Tkinter writing-pad interface with a canvas on the left and recognized text on the right.
   - Added live stroke reflection while writing with mouse/tablet-style pointer input.
   - Added recognition after stroke release.
-  - Added a local trainable template recognizer that learns samples from the user's own strokes and stores them in `data/user_templates.json`.
+  - Added pretrained TrOCR handwritten OCR adapter using `microsoft/trocr-small-handwritten`.
+  - Added automatic whole-ink recognition after a short pause and a `Recognize Now` button.
+  - Kept the local template recognizer only as fallback/debug support.
+  - Added numpy RGB rendering for TrOCR input, avoiding a hard Pillow dependency in tests.
   - Added UI controls for clear ink, space, backspace, clear text, and saving a taught character sample.
-  - Added tests for template recognizer empty-state behavior, learning, recognition, and JSON persistence.
+  - Added tests for template recognizer empty-state behavior, learning, recognition, JSON persistence, and TrOCR stroke rendering.
 - Not yet implemented:
   - High-accuracy handwriting recognition model training
   - Full spelling/grammar/semantic correction models
@@ -64,8 +67,9 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - Stroke recording uses versioned JSON so captured samples can become repeatable evaluation fixtures.
 - Preprocessing currently uses numpy-only image operations to keep Raspberry Pi migration simple.
 - The first model input target is 28x28 grayscale to remain compatible with the existing EMNIST/CNN baseline.
-- Recognition must be built from scratch. The first baseline is a local template learner so the interface, capture flow, and sample collection work before model training begins.
-- The template recognizer is not the final high-accuracy recognizer. It is a practical first baseline and a way to collect user-specific examples.
+- Main recognition path now uses a pretrained handwriting OCR model, not manual alphabet entry.
+- The template recognizer is not the main recognizer. It is fallback/debug support and a way to collect user-specific examples if needed.
+- TrOCR is suitable for handwritten line OCR experiments, but Raspberry Pi latency must be measured before calling it production-ready.
 
 ## Known Limitations And Risks
 
@@ -94,6 +98,7 @@ python -m pytest
 PYTHONPATH=src python -m assistive_writing_pad
 PYTHONPATH=src python -m assistive_writing_pad.display.handwriting_app
 PYTHONPATH=src python -m assistive_writing_pad.capture.huion_probe
+pip install -e ".[models]"
 git --git-dir=.git-local --work-tree=. status
 ```
 
@@ -159,6 +164,22 @@ Phase 4A:
   - Multi-stroke letters, words, and line segmentation still need implementation.
   - Template matching will not reach the final target accuracy alone.
 
+Phase 4B:
+
+- Unit tests: 18 passed.
+- Main recognizer:
+  - `microsoft/trocr-small-handwritten`
+  - Lazy-loaded so the UI opens even before model dependencies are installed.
+  - Requires `pip install -e ".[models]"`.
+  - First use downloads model weights from Hugging Face.
+- Accuracy:
+  - Not measured locally yet because `torch` and `transformers` are not installed in the current environment.
+  - Rendering path verified with tests.
+- Limitations:
+  - First recognition may be slow because the model is downloaded and loaded.
+  - UI currently runs recognition synchronously; a background worker should be added if laptop inference blocks interaction.
+  - TrOCR performance on Raspberry Pi 4 is unknown and likely needs quantization or replacement with a smaller model.
+
 Planned metrics:
 
 - Character accuracy
@@ -171,7 +192,7 @@ Planned metrics:
 
 ## Next Session Focus
 
-1. Improve handwriting recognition from scratch using collected samples.
-2. Add a sample-collection mode for many labeled letters/words.
-3. Add stroke grouping for multi-stroke characters and word boundaries.
-4. Add a first trainable classifier evaluation path before correction work resumes.
+1. Install model dependencies in a Python 3.9-3.11 environment and run the pretrained UI.
+2. Measure recognition quality and latency on real writing-pad strokes.
+3. Move OCR inference to a background worker if UI blocking is noticeable.
+4. Add stroke/line grouping rules for continuous sentence writing before correction work resumes.

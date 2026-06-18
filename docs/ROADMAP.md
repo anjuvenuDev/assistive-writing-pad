@@ -59,18 +59,19 @@
   - Generated images match expected model input shape: met with 28x28 output
   - Unit tests cover empty strokes and oversized writing: met
 
-## Phase 4 - From-Scratch Handwriting Recognition Baseline
+## Phase 4 - Pretrained Handwriting Recognition Interface
 
-- Timeline: in progress, first UI/template baseline completed on 2026-06-18
+- Timeline: in progress, pretrained UI adapter completed on 2026-06-18
 - Complexity: high
 - Dependencies: Phase 3
 - Deliverables:
-  - Local recognizer adapter: completed through template recognizer
+  - Local recognizer adapter: completed through TrOCR adapter
   - Clean handwriting interface: completed
   - Stroke capture reflected on screen: completed
-  - Recognition after stroke release: completed
-  - From-scratch sample learning: completed
-  - High-accuracy trained classifier: pending
+  - Recognition after stroke release/pause: completed
+  - Pretrained handwritten OCR model: completed with `microsoft/trocr-small-handwritten`
+  - Fallback sample learning: completed
+  - Accuracy and latency benchmark on real strokes: pending
   - Character or word confidence scores: initial confidence completed
   - Confidence threshold behavior at 0.85: completed in core pipeline; UI currently uses 0.60 for template feedback
 - Success criteria:
