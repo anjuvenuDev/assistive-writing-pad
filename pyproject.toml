@@ -9,7 +9,7 @@ description = "Real-time assistive handwriting recognition and correction system
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-  "numpy>=1.24",
+  "numpy>=1.24,<2",
   "opencv-python-headless>=4.8",
   "Pillow>=10.0",
   "pydantic>=2.0",
@@ -24,10 +24,9 @@ dev = [
   "ruff>=0.5",
 ]
 models = [
-  "onnxruntime>=1.17",
-  "torch>=2.2",
-  "torchvision>=0.17",
-  "transformers>=4.40",
+  "protobuf>=4.25",
+  "sentencepiece>=0.2",
+  "transformers>=4.40,<5",
 ]
 hardware = [
   "evdev>=1.7; platform_system == 'Linux'",

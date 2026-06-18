@@ -71,11 +71,12 @@ class TrOCRHandwritingRecognizer:
         except ImportError as exc:
             raise RecognitionUnavailable(
                 "Pretrained OCR dependencies are missing. Install them with "
+                "`scripts/setup_model_env.sh`, or install CPU PyTorch first and then "
                 "`pip install -e '.[models]'`."
             ) from exc
 
         self._torch = torch
-        self._processor = TrOCRProcessor.from_pretrained(self.model_name)
+        self._processor = TrOCRProcessor.from_pretrained(self.model_name, use_fast=False)
         self._model = VisionEncoderDecoderModel.from_pretrained(self.model_name)
         self._model.eval()
 

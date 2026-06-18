@@ -50,6 +50,11 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added a browser-based local web interface using only the Python standard library for serving.
   - Added canvas stroke capture in the browser and `/api/recognize` backend endpoint.
   - Added web payload parsing tests.
+  - Created `.venv` with Python 3.10.12.
+  - Installed CPU-only PyTorch 2.6.0 from the PyTorch CPU wheel index.
+  - Installed Transformers, protobuf, and SentencePiece for TrOCR.
+  - Loaded `microsoft/trocr-small-handwritten` successfully into the local Hugging Face cache.
+  - Ran one adapter-level inference call with simulated strokes; the adapter returned text and confidence.
 - Not yet implemented:
   - High-accuracy handwriting recognition model training
   - Full spelling/grammar/semantic correction models
@@ -74,6 +79,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - Main recognition path now uses a pretrained handwriting OCR model, not manual alphabet entry.
 - The template recognizer is not the main recognizer. It is fallback/debug support and a way to collect user-specific examples if needed.
 - TrOCR is suitable for handwritten line OCR experiments, but Raspberry Pi latency must be measured before calling it production-ready.
+- CPU-only PyTorch must be installed before project model extras. The setup script handles this.
 
 ## Known Limitations And Risks
 
@@ -103,7 +109,7 @@ PYTHONPATH=src python -m assistive_writing_pad
 PYTHONPATH=src python -m assistive_writing_pad.display.web_app
 PYTHONPATH=src python -m assistive_writing_pad.display.handwriting_app
 PYTHONPATH=src python -m assistive_writing_pad.capture.huion_probe
-pip install -e ".[models]"
+scripts/setup_model_env.sh
 git --git-dir=.git-local --work-tree=. status
 ```
 
@@ -171,20 +177,21 @@ Phase 4A:
 
 Phase 4B:
 
-- Unit tests: 18 passed.
+- Unit tests: 20 passed in the Python 3.10 virtualenv.
 - Main recognizer:
   - `microsoft/trocr-small-handwritten`
   - Lazy-loaded so the UI opens even before model dependencies are installed.
-  - Requires `pip install -e ".[models]"`.
-  - First use downloads model weights from Hugging Face.
+  - Requires CPU PyTorch plus `pip install -e ".[models]"`; use `scripts/setup_model_env.sh`.
+  - Model weights have been downloaded and loaded successfully in `.venv`.
 - Accuracy:
-  - Not measured locally yet because `torch` and `transformers` are not installed in the current environment.
   - Rendering path verified with tests.
+  - One simulated-stroke inference returned `MOND` with confidence `0.362`; this only verifies wiring, not accuracy, because the simulator does not produce real handwriting.
 - Limitations:
   - First recognition may be slow because the model is downloaded and loaded.
   - Browser UI now avoids the Tkinter display issue reproduced in this environment.
   - Recognition currently runs synchronously on the server; a background worker should be added if laptop inference blocks interaction.
   - TrOCR performance on Raspberry Pi 4 is unknown and likely needs quantization or replacement with a smaller model.
+  - Generic PyPI `torch` pulls CUDA dependencies on this machine, so CPU-only PyTorch must be installed from the PyTorch CPU wheel index.
 
 Planned metrics:
 

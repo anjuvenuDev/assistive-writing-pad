@@ -60,10 +60,17 @@ The main recognizer is the pretrained handwritten OCR model
 `microsoft/trocr-small-handwritten`. Manual template learning is only fallback
 support, not the expected user workflow.
 
-Install model dependencies before using pretrained recognition:
+Install model dependencies before using pretrained recognition. Use the setup
+script so PyTorch is installed from the CPU-only wheel index:
 
 ```bash
-pip install -e ".[models]"
+scripts/setup_model_env.sh
+```
+
+After setup, run the app with:
+
+```bash
+.venv/bin/python -m assistive_writing_pad.display.web_app
 ```
 
 The first run downloads the model from Hugging Face and can take time. After
