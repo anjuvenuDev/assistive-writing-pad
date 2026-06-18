@@ -44,11 +44,17 @@ git --git-dir=.git-local --work-tree=. status
 
 ## Handwriting Interface
 
-Run the first writing-pad interface:
+Run the browser-based writing-pad interface:
 
 ```bash
-PYTHONPATH=src python -m assistive_writing_pad.display.handwriting_app
+PYTHONPATH=src python -m assistive_writing_pad.display.web_app
 ```
+
+Then open `http://127.0.0.1:8000` in a browser.
+
+The older Tkinter interface is still available, but the browser UI is the
+preferred path because it works more reliably across laptop, tablet, and
+Raspberry Pi setups.
 
 The main recognizer is the pretrained handwritten OCR model
 `microsoft/trocr-small-handwritten`. Manual template learning is only fallback

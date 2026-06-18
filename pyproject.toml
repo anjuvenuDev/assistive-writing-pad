@@ -36,6 +36,7 @@ hardware = [
 [project.scripts]
 assistive-writing-pad = "assistive_writing_pad.__main__:main"
 assistive-writing-ui = "assistive_writing_pad.display.handwriting_app:main"
+assistive-writing-web = "assistive_writing_pad.display.web_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

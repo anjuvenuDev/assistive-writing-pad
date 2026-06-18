@@ -46,6 +46,10 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added numpy RGB rendering for TrOCR input, avoiding a hard Pillow dependency in tests.
   - Added UI controls for clear ink, space, backspace, clear text, and saving a taught character sample.
   - Added tests for template recognizer empty-state behavior, learning, recognition, JSON persistence, and TrOCR stroke rendering.
+  - Reproduced a UI startup failure in the current environment: Tkinter cannot connect to display `:0`.
+  - Added a browser-based local web interface using only the Python standard library for serving.
+  - Added canvas stroke capture in the browser and `/api/recognize` backend endpoint.
+  - Added web payload parsing tests.
 - Not yet implemented:
   - High-accuracy handwriting recognition model training
   - Full spelling/grammar/semantic correction models
@@ -96,6 +100,7 @@ Current commands:
 ```bash
 python -m pytest
 PYTHONPATH=src python -m assistive_writing_pad
+PYTHONPATH=src python -m assistive_writing_pad.display.web_app
 PYTHONPATH=src python -m assistive_writing_pad.display.handwriting_app
 PYTHONPATH=src python -m assistive_writing_pad.capture.huion_probe
 pip install -e ".[models]"
@@ -177,7 +182,8 @@ Phase 4B:
   - Rendering path verified with tests.
 - Limitations:
   - First recognition may be slow because the model is downloaded and loaded.
-  - UI currently runs recognition synchronously; a background worker should be added if laptop inference blocks interaction.
+  - Browser UI now avoids the Tkinter display issue reproduced in this environment.
+  - Recognition currently runs synchronously on the server; a background worker should be added if laptop inference blocks interaction.
   - TrOCR performance on Raspberry Pi 4 is unknown and likely needs quantization or replacement with a smaller model.
 
 Planned metrics:
@@ -192,7 +198,7 @@ Planned metrics:
 
 ## Next Session Focus
 
-1. Install model dependencies in a Python 3.9-3.11 environment and run the pretrained UI.
+1. Install model dependencies in a Python 3.10 environment and run the browser UI.
 2. Measure recognition quality and latency on real writing-pad strokes.
 3. Move OCR inference to a background worker if UI blocking is noticeable.
 4. Add stroke/line grouping rules for continuous sentence writing before correction work resumes.
