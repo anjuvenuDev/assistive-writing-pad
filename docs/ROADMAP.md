@@ -31,18 +31,18 @@
 
 ## Phase 2 - Tablet And Simulator Input Capture
 
-- Timeline: 3-5 days
+- Timeline: completed on 2026-06-18
 - Complexity: medium
 - Dependencies: Phase 1
 - Deliverables:
-  - Huion HS64 event probe for Linux
-  - Stroke capture abstraction using x, y, pressure, and timing
-  - Mouse/synthetic simulator for development without hardware
-  - Raw stroke JSON recording and playback
+  - Huion HS64 event probe for Linux: completed
+  - Stroke capture abstraction using x, y, pressure, and timing: completed
+  - Synthetic simulator for development without hardware: completed
+  - Raw stroke JSON recording and playback: completed
 - Success criteria:
-  - Capture produces stable stroke records
-  - Replay path feeds the same pipeline contracts as live hardware
-  - Hardware absence does not block development
+  - Capture produces stable stroke records: met by simulator tests
+  - Replay path feeds the same pipeline contracts as live hardware: met by JSON round-trip tests
+  - Hardware absence does not block development: met by lazy `evdev` imports
 
 ## Phase 3 - Stroke And Image Preprocessing
 

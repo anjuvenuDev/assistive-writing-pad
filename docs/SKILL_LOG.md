@@ -14,7 +14,7 @@ Build a real-time handwriting recognition and intelligent correction system for 
 
 ## Current Phase Status
 
-- Phase: 1 - Repository scaffold and core contracts
+- Phase: 2 - Tablet and simulator input capture
 - Status: completed
 - Completed this session:
   - Reviewed repository state and confirmed the GitHub remote has no refs yet.
@@ -26,13 +26,18 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Added a small rule-based corrector for early demo/error-pattern tests.
   - Added tests for high-confidence correction flow and low-confidence manual review gating.
   - Added project metadata in `pyproject.toml`, `README.md`, `.gitignore`, and `models/README.md`.
+  - Added `StrokeSimulator` for hardware-free capture development.
+  - Added stroke JSON save/load helpers for recording and replay.
+  - Added Huion/Linux input device probe with lazy `evdev` import.
+  - Added minimal Huion event reader that maps ABS_X, ABS_Y, and ABS_PRESSURE into `StrokePoint`.
+  - Added capture tests for simulator output, stroke replay, schema validation, and Huion device detection.
 - Not yet implemented:
-  - Huion HS64 live input capture
   - Stroke/image preprocessing
   - Real handwriting recognition model loading
   - Full spelling/grammar/semantic correction models
   - Real-time UI
   - Evaluation datasets and benchmark runner
+  - Hardware-validated Huion coordinate scaling and pressure normalization
 
 ## Technical Decisions
 
@@ -43,6 +48,8 @@ Build a real-time handwriting recognition and intelligent correction system for 
 - The 98% corrected output target will be evaluated on controlled benchmark sets and project-specific handwriting samples; it should not be assumed for unconstrained child handwriting until measured.
 - Confidence gating is enforced at the pipeline layer so low-confidence recognition is flagged before correction.
 - In this sandbox, `.git` is a read-only empty placeholder. Local commits use `.git-local` with `git --git-dir=.git-local --work-tree=.`.
+- Hardware dependencies are imported lazily so simulator, tests, and non-Linux development do not require `evdev`.
+- Stroke recording uses versioned JSON so captured samples can become repeatable evaluation fixtures.
 
 ## Known Limitations And Risks
 
@@ -69,6 +76,7 @@ Current commands:
 ```bash
 python -m pytest
 PYTHONPATH=src python -m assistive_writing_pad
+PYTHONPATH=src python -m assistive_writing_pad.capture.huion_probe
 git --git-dir=.git-local --work-tree=. status
 ```
 
@@ -94,6 +102,18 @@ Phase 1:
   - Letter order: `recieve -> receive`
   - Doubling errors: `writting -> writing`, `occured -> occurred`
 
+Phase 2:
+
+- Unit tests: 8 passed.
+- Capture accuracy: not applicable yet; hardware capture has not been validated on a connected Huion HS64.
+- Simulator behavior:
+  - Deterministic stroke points with x/y/timestamp/pressure.
+  - Monotonic timestamps.
+  - JSON round-trip verified.
+- Raspberry Pi compatibility:
+  - `evdev` is optional and lazy-loaded.
+  - Stroke JSON uses standard library only.
+
 Planned metrics:
 
 - Character accuracy
@@ -106,7 +126,7 @@ Planned metrics:
 
 ## Next Session Focus
 
-1. Phase 2: add Huion HS64 event probing and a simulator capture backend.
-2. Define raw stroke JSON recording and playback.
-3. Add tests for stroke serialization and replay.
-4. Keep live hardware optional so development can continue without the tablet connected.
+1. Phase 3: implement stroke and image preprocessing.
+2. Add rasterization from `StrokePoint` to grayscale image arrays.
+3. Add bounding-box crop, padding, resizing, and normalization.
+4. Add tests for empty input, variable-size writing, and pressure-aware rendering.
