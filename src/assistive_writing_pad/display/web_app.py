@@ -174,7 +174,7 @@ HTML = """<!doctype html>
       </div>
       <textarea id="recognized" spellcheck="false"></textarea>
       <div class="setup">
-        Pretrained OCR uses <code>microsoft/trocr-base-handwritten</code> with line-aware
+        Pretrained OCR uses <code>microsoft/trocr-small-handwritten</code> with line-aware
         segmentation. If recognition reports missing dependencies, create a Python 3.10
         environment and run <code>scripts/setup_model_env.sh</code>.
       </div>

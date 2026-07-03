@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
@@ -16,7 +18,7 @@ import numpy as np
 
 from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
-DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-base-handwritten")
+DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-small-handwritten")
 
 
 class RecognitionUnavailable(RuntimeError):
@@ -55,12 +57,22 @@ class TrOCRHandwritingRecognizer:
                 output_scores=True,
             )
 
-        text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+        raw_text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+        text = _clean_ocr_text(raw_text)
+        if _looks_like_single_character_input([strokes]):
+            text = _single_character_guess(text)
+            hinted = _shape_hint_for_single_character([strokes], text)
+            if hinted is not None:
+                text = hinted
         confidence = _generation_confidence(generated, self._torch)
         return RecognitionResult(
             text=text.strip(),
             confidence=confidence,
-            metadata={"recognizer": "trocr", "model": self.model_name},
+            metadata={
+                "recognizer": "trocr",
+                "model": self.model_name,
+                "raw_text": raw_text.strip(),
+            },
         )
 
     def recognize_stroke_groups(self, stroke_groups: Sequence[Sequence[StrokePoint]]) -> RecognitionResult:
@@ -72,7 +84,10 @@ class TrOCRHandwritingRecognizer:
             )
 
         self._ensure_loaded()
-        lines = segment_strokes_into_lines(stroke_groups)
+        if _looks_like_single_character_input(stroke_groups):
+            lines = [list(stroke_groups)]
+        else:
+            lines = segment_strokes_into_lines(stroke_groups)
         line_results = []
         line_texts = []
         confidences = []
@@ -87,7 +102,13 @@ class TrOCRHandwritingRecognizer:
                     return_dict_in_generate=True,
                     output_scores=True,
                 )
-            text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+            raw_text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+            text = _clean_ocr_text(raw_text)
+            if _looks_like_single_character_input(line_groups):
+                text = _single_character_guess(text)
+                hinted = _shape_hint_for_single_character(line_groups, text)
+                if hinted is not None:
+                    text = hinted
             confidence = _generation_confidence(generated, self._torch)
             line_texts.append(text.strip())
             confidences.append(confidence)
@@ -95,6 +116,7 @@ class TrOCRHandwritingRecognizer:
                 {
                     "line_index": line_index,
                     "text": text.strip(),
+                    "raw_text": raw_text.strip(),
                     "confidence": confidence,
                     "stroke_groups": len(line_groups),
                 }
@@ -127,7 +149,11 @@ class TrOCRHandwritingRecognizer:
 
         self._torch = torch
         self._processor = TrOCRProcessor.from_pretrained(self.model_name, use_fast=False)
-        self._model = VisionEncoderDecoderModel.from_pretrained(self.model_name)
+        self._model = VisionEncoderDecoderModel.from_pretrained(
+            self.model_name,
+            low_cpu_mem_usage=False,
+        )
+        self._model.to(torch.device("cpu"))
         self._model.eval()
 
 
@@ -287,3 +313,293 @@ def _generation_confidence(generated, torch_module) -> float:
     if not token_confidences:
         return 0.0
     return float(np.mean(token_confidences))
+
+
+def _looks_like_single_character_input(stroke_groups: Sequence[Sequence[StrokePoint]]) -> bool:
+    if not stroke_groups:
+        return False
+    total_points = sum(len(stroke) for stroke in stroke_groups)
+    return len(stroke_groups) <= 3 and total_points <= 220
+
+
+def _clean_ocr_text(text: str) -> str:
+    """Normalize frequent TrOCR artifacts for handwritten alphabet input."""
+
+    if not text:
+        return ""
+
+    text = text.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    text = text.replace("#", " ")
+    tokens = text.split()
+    input_has_alpha = any(any(char.isalpha() for char in token) for token in tokens)
+
+    cleaned_tokens = []
+    for token in tokens:
+        token = re.sub(r"[^0-9A-Za-z'\-]+", "", token)
+        if not token:
+            continue
+
+        has_alpha = any(char.isalpha() for char in token)
+        has_digit = any(char.isdigit() for char in token)
+
+        if has_alpha and has_digit:
+            token = "".join(char for char in token if char.isalpha() or char in "'-")
+            token = token.strip("-'")
+            if not token:
+                continue
+        elif input_has_alpha and has_digit and len(token) <= 4:
+            # Standalone short number tokens are usually OCR noise for letters.
+            continue
+
+        cleaned_tokens.append(token)
+
+    return " ".join(cleaned_tokens).strip()
+
+
+def _single_character_guess(text: str) -> str:
+    """Collapse noisy line OCR output into a likely single alphabet character."""
+
+    text = text.strip()
+    if len(text) <= 1:
+        return text
+
+    letters = [char.lower() for char in text if char.isalpha()]
+    if not letters:
+        digits = [char for char in text if char.isdigit()]
+        if not digits:
+            return ""
+        digit_to_letter = {
+            "0": "o",
+            "1": "l",
+            "2": "z",
+            "5": "s",
+            "6": "g",
+            "8": "b",
+        }
+        mapped = [digit_to_letter.get(char, "") for char in digits]
+        mapped = [char for char in mapped if char]
+        return mapped[-1] if mapped else ""
+
+    if len(letters) == 1:
+        return letters[0]
+
+    counts = Counter(letters)
+    best_count = max(counts.values())
+    tied = {char for char, count in counts.items() if count == best_count}
+
+    consonant_tied = {char for char in tied if char not in {"a", "e", "i", "o", "u"}}
+    if consonant_tied:
+        for char in reversed(letters):
+            if char in consonant_tied:
+                return char
+
+    for char in reversed(letters):
+        if char in tied:
+            return char
+    return letters[-1]
+
+
+def _shape_hint_for_single_character(
+    stroke_groups: Sequence[Sequence[StrokePoint]],
+    current_guess: str,
+) -> Optional[str]:
+    """Override specific single-letter confusions using stroke geometry."""
+
+    if not stroke_groups:
+        return None
+
+    guess = current_guess.strip().lower()
+    if guess not in {"", "a", "m", "t", "l", "i", "j", "o", "q", "g", "r"}:
+        return None
+
+    dot_hint = _dot_above_stem_hint(stroke_groups)
+    if dot_hint is not None:
+        return dot_hint
+
+    if guess in {"o", "q", "g"}:
+        stem_hint = _open_stem_hint(stroke_groups)
+        if stem_hint is not None:
+            return stem_hint
+
+    points = [point for stroke in stroke_groups for point in stroke]
+    if len(points) < 8:
+        return None
+
+    min_x, max_x, min_y, max_y = _bounds(points)
+    width = max(max_x - min_x, 1.0)
+    height = max(max_y - min_y, 1.0)
+    aspect = height / width
+    if aspect < 1.3:
+        return None
+
+    first_stroke = next((stroke for stroke in stroke_groups if stroke), [])
+    if len(first_stroke) < 6:
+        return None
+
+    prefix_len = max(3, int(len(first_stroke) * 0.35))
+    prefix = first_stroke[:prefix_len]
+    prefix_x_span = max(point.x for point in prefix) - min(point.x for point in prefix)
+    prefix_y_span = max(point.y for point in prefix) - min(point.y for point in prefix)
+
+    stem_like = prefix_x_span <= width * 0.22 and prefix_y_span >= height * 0.45
+    end_point = first_stroke[-1]
+    right_leg = (end_point.x - min_x) >= width * 0.5 and (end_point.y - min_y) >= height * 0.55
+
+    if stem_like and right_leg:
+        return "h"
+
+    return None
+
+
+def _dot_above_stem_hint(stroke_groups: Sequence[Sequence[StrokePoint]]) -> Optional[str]:
+    """Detect dotted lowercase glyphs such as i/j from detached tiny strokes."""
+
+    non_empty = [stroke for stroke in stroke_groups if stroke]
+    if len(non_empty) < 2:
+        return None
+
+    flattened = [point for stroke in non_empty for point in stroke]
+    min_x, max_x, min_y, max_y = _bounds(flattened)
+    width = max(max_x - min_x, 1.0)
+    height = max(max_y - min_y, 1.0)
+
+    group_boxes = []
+    for stroke in non_empty:
+        sx0, sx1, sy0, sy1 = _bounds(stroke)
+        group_boxes.append(
+            {
+                "stroke": stroke,
+                "min_x": sx0,
+                "max_x": sx1,
+                "min_y": sy0,
+                "max_y": sy1,
+                "width": max(sx1 - sx0, 1.0),
+                "height": max(sy1 - sy0, 1.0),
+                "size": len(stroke),
+                "center_x": (sx0 + sx1) / 2.0,
+            }
+        )
+
+    dot_candidates = [
+        box
+        for box in group_boxes
+        if box["size"] <= 8
+        and box["width"] <= max(width * 0.35, 3.0)
+        and box["height"] <= max(height * 0.22, 3.0)
+    ]
+    if not dot_candidates:
+        return None
+
+    main = max(group_boxes, key=lambda box: box["height"] * box["size"])
+    for dot in dot_candidates:
+        above_main = dot["max_y"] < (main["min_y"] - height * 0.08)
+        x_aligned = abs(dot["center_x"] - main["center_x"]) <= max(width * 0.35, 3.0)
+        if above_main and x_aligned:
+            end_point = main["stroke"][-1]
+            deep_descender = (main["max_y"] - min_y) >= height * 0.82
+            left_hook = end_point.x <= (main["center_x"] - max(width * 0.08, 1.5))
+            if deep_descender and left_hook:
+                return "j"
+            return "i"
+
+    return None
+
+
+def _open_stem_hint(stroke_groups: Sequence[Sequence[StrokePoint]]) -> Optional[str]:
+    """Detect open stem letters (for example r/l/t) that OCR may confuse with loop letters."""
+
+    stroke = _dominant_stroke(stroke_groups)
+    if not stroke or len(stroke) < 6:
+        return None
+
+    min_x, max_x, min_y, max_y = _bounds(stroke)
+    width = max(max_x - min_x, 1.0)
+    height = max(max_y - min_y, 1.0)
+    if height / width < 1.1:
+        return None
+
+    if _is_closed_loop(stroke, width, height):
+        return None
+
+    start = stroke[0]
+    end = stroke[-1]
+
+    top_band = min_y + height * 0.35
+    top_points = [point for point in stroke if point.y <= top_band]
+    top_span = (max(point.x for point in top_points) - min(point.x for point in top_points)) if top_points else 0.0
+
+    has_top_arm = top_span >= width * 0.45
+    starts_near_left = (start.x - min_x) <= width * 0.35
+    has_tall_stem = _max_vertical_column_span(stroke, width) >= height * 0.62
+    stem_x = _dominant_stem_x(stroke, width)
+
+    descends_to_bottom = (max_y - end.y) <= height * 0.2
+
+    if has_top_arm and has_tall_stem:
+        if top_points:
+            left_reach = stem_x - min(point.x for point in top_points)
+            right_reach = max(point.x for point in top_points) - stem_x
+        else:
+            left_reach = 0.0
+            right_reach = 0.0
+
+        looks_like_crossbar = left_reach >= width * 0.18 and right_reach >= width * 0.22
+        if top_span >= width * 0.60 and looks_like_crossbar:
+            return "t"
+        if starts_near_left or descends_to_bottom:
+            return "r"
+        return "r"
+
+    if not has_top_arm and descends_to_bottom and starts_near_left and (end.x - min_x) <= width * 0.25:
+        return "l"
+
+    return None
+
+
+def _dominant_stroke(stroke_groups: Sequence[Sequence[StrokePoint]]) -> Sequence[StrokePoint]:
+    non_empty = [stroke for stroke in stroke_groups if stroke]
+    if not non_empty:
+        return []
+    return max(non_empty, key=lambda stroke: len(stroke))
+
+
+def _is_closed_loop(stroke: Sequence[StrokePoint], width: float, height: float) -> bool:
+    if len(stroke) < 6:
+        return False
+    start = stroke[0]
+    end = stroke[-1]
+    dx = abs(end.x - start.x)
+    dy = abs(end.y - start.y)
+    return dx <= width * 0.22 and dy <= height * 0.22
+
+
+def _max_vertical_column_span(stroke: Sequence[StrokePoint], width: float) -> float:
+    if not stroke:
+        return 0.0
+    tolerance = max(width * 0.08, 1.5)
+    best = 0.0
+    for anchor in stroke:
+        column = [point for point in stroke if abs(point.x - anchor.x) <= tolerance]
+        if len(column) < 2:
+            continue
+        span = max(point.y for point in column) - min(point.y for point in column)
+        if span > best:
+            best = span
+    return best
+
+
+def _dominant_stem_x(stroke: Sequence[StrokePoint], width: float) -> float:
+    if not stroke:
+        return 0.0
+    tolerance = max(width * 0.08, 1.5)
+    best_span = -1.0
+    best_x = stroke[0].x
+    for anchor in stroke:
+        column = [point for point in stroke if abs(point.x - anchor.x) <= tolerance]
+        if len(column) < 2:
+            continue
+        span = max(point.y for point in column) - min(point.y for point in column)
+        if span > best_span:
+            best_span = span
+            best_x = float(np.mean([point.x for point in column]))
+    return best_x
