@@ -1,5 +1,9 @@
 from assistive_writing_pad.contracts import StrokePoint
-from assistive_writing_pad.recognition.trocr import render_strokes_for_trocr
+from assistive_writing_pad.recognition.trocr import (
+    _DEFAULT_RENDER_H,
+    _DEFAULT_RENDER_W,
+    render_strokes_for_trocr,
+)
 
 
 def test_trocr_renderer_returns_rgb_numpy_line_image() -> None:
@@ -10,7 +14,8 @@ def test_trocr_renderer_returns_rgb_numpy_line_image() -> None:
         ]
     )
 
-    assert image.shape == (128, 384, 3)
+    # Shape must match the configured default render canvas.
+    assert image.shape == (_DEFAULT_RENDER_H, _DEFAULT_RENDER_W, 3)
     assert image.dtype.name == "uint8"
     assert image.min() == 0
     assert image.max() == 255
@@ -19,5 +24,5 @@ def test_trocr_renderer_returns_rgb_numpy_line_image() -> None:
 def test_trocr_renderer_handles_empty_strokes() -> None:
     image = render_strokes_for_trocr([])
 
-    assert image.shape == (128, 384, 3)
+    assert image.shape == (_DEFAULT_RENDER_H, _DEFAULT_RENDER_W, 3)
     assert image.min() == 255

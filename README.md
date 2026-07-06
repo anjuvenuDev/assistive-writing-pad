@@ -12,7 +12,20 @@ The project is designed for laptop-first development and Raspberry Pi 4 migratio
 
 ## Current Status
 
-Phase 1 is in progress: repository scaffold, core contracts, configuration, and testable pipeline skeleton.
+The project has moved beyond the initial scaffold. So far, the repo includes a testable end-to-end pipeline with capture, preprocessing, recognition, and display components.
+
+What has been done so far:
+
+- Project scaffold, package metadata, and core data contracts for stroke, recognition, correction, and pipeline results
+- Runtime settings with Raspberry Pi validation and a deterministic demo recognizer for early testing
+- Huion HS64 input probing, stroke simulation, JSON save/load helpers, and a minimal event reader
+- CPU-only stroke rasterization and preprocessing into 28x28 grayscale model inputs
+- A rule-based correction layer for early dysgraphia-style error patterns
+- A Tkinter handwriting app and a browser-based web UI for writing, recognition, and basic text actions
+- Pretrained handwritten OCR support through TrOCR, with lazy loading and local cache usage
+- Tests covering capture, preprocessing, template recognition, TrOCR rendering, web payload parsing, and pipeline behavior
+
+The next major gaps are real handwriting accuracy benchmarking, sentence-level correction, word/line segmentation refinement, and Raspberry Pi performance validation.
 
 ## Repository Layout
 

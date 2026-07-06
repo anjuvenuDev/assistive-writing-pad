@@ -3,22 +3,88 @@
 The default checkpoint is Microsoft's IAM-finetuned handwritten TrOCR base
 model. Imports are lazy so the rest of the application remains usable before
 model dependencies are installed.
+
+Environment variables
+---------------------
+AWP_TROCR_MODEL
+    HuggingFace checkpoint name (default: microsoft/trocr-small-handwritten).
+AWP_TROCR_RENDER_SIZE
+    Render canvas size in WxH format, e.g. "768x256" (default: 768x256).
+    Increase for higher accuracy; decrease on memory-constrained devices.
+AWP_DEBUG_OCR
+    Set to "1" to save raw/cropped/processed images to data/debug/ on every
+    recognition call.  Off by default.
+AWP_WORD_SEGMENT
+    Set to "1" to enable horizontal word segmentation before OCR.  Each
+    detected word is recognised independently and results are joined with
+    spaces.  Off by default (safer for tightly written text).
+AWP_OCR_MODE
+    Default recognition mode: "auto" (default), "character", or "word".
+    Can be overridden per-request via the API payload.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
 from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
+logger = logging.getLogger(__name__)
+
+# Recognition mode type.
+# "auto"      -- use single-character path when strokes look like one char,
+#                word path otherwise.
+# "character" -- always use single-character path + confusion correction.
+# "word"      -- always use full-line TrOCR path, no confusion correction.
+RecognitionMode = Literal["auto", "character", "word"]
+
+_DEFAULT_OCR_MODE: RecognitionMode = os.environ.get(  # type: ignore[assignment]
+    "AWP_OCR_MODE", "auto"
+).strip() or "auto"
+
 DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-small-handwritten")
+
+# Default render canvas: 768x256 gives TrOCR roughly 2x the horizontal
+# resolution compared to the previous 384x128, which significantly improves
+# recognition of narrow letters and connected script.
+_DEFAULT_RENDER_W = 768
+_DEFAULT_RENDER_H = 256
+
+# Whether horizontal word segmentation is enabled (off by default).
+_WORD_SEGMENT_ENABLED: bool = os.environ.get("AWP_WORD_SEGMENT", "0").strip() == "1"
+
+
+def _parse_render_size() -> tuple:
+    """Return (width, height) for the TrOCR render canvas.
+
+    Reads AWP_TROCR_RENDER_SIZE env var (format: "WxH", e.g. "768x256").
+    Falls back to (_DEFAULT_RENDER_W, _DEFAULT_RENDER_H) on any parse error.
+    """
+    raw = os.environ.get("AWP_TROCR_RENDER_SIZE", "").strip()
+    if raw:
+        try:
+            w_str, h_str = raw.lower().split("x")
+            w, h = int(w_str), int(h_str)
+            if w > 0 and h > 0:
+                logger.debug("render size from AWP_TROCR_RENDER_SIZE: %dx%d", w, h)
+                return (w, h)
+        except (ValueError, AttributeError):
+            logger.warning(
+                "AWP_TROCR_RENDER_SIZE='%s' is not valid WxH format -- using default %dx%d",
+                raw, _DEFAULT_RENDER_W, _DEFAULT_RENDER_H,
+            )
+    return (_DEFAULT_RENDER_W, _DEFAULT_RENDER_H)
+
+
+_RENDER_SIZE: tuple = _parse_render_size()
 
 
 class RecognitionUnavailable(RuntimeError):
@@ -34,8 +100,9 @@ class TrOCRHandwritingRecognizer:
         self._processor = None
         self._model = None
         self._torch = None
+        self._emnist_recognizer = None
 
-    def recognize(self, strokes: Sequence[StrokePoint]) -> RecognitionResult:
+    def recognize(self, strokes: Sequence[StrokePoint], mode: RecognitionMode = "auto") -> RecognitionResult:
         if not strokes:
             return RecognitionResult(
                 text="",
@@ -44,27 +111,90 @@ class TrOCRHandwritingRecognizer:
             )
 
         self._ensure_loaded()
-        image = render_strokes_for_trocr(strokes)
 
+        # Resolve effective mode.
+        effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
+        is_single_char = _looks_like_single_character_input([strokes])
+        use_char_mode = effective_mode == "character" or (effective_mode == "auto" and is_single_char)
+        logger.info(
+            "recognize: mode=%s effective=%s is_single_char=%s",
+            mode, "character" if use_char_mode else "word", is_single_char,
+        )
+
+        if use_char_mode:
+            if self._emnist_recognizer is None:
+                from assistive_writing_pad.recognition.emnist import EMNISTCharacterRecognizer
+                self._emnist_recognizer = EMNISTCharacterRecognizer()
+            res = self._emnist_recognizer.recognize(strokes)
+            # top5 carries up to 5 candidates (CNN + confusion-map siblings).
+            top5 = [(c.character, c.confidence) for c in res.character_confidences]
+            # Log confusion pairs: when rank-1 differs between raw CNN and merged output
+            # this is already logged inside emnist.py; surface it here too for the API.
+            confusion_pairs = [
+                f"{top5[0][0]}\u2194{c}" for c, _ in top5[1:4]
+            ] if len(top5) > 1 else []
+            logger.info(
+                "recognize [character]: result=%r conf=%.3f top5=%r confusion=%r",
+                res.text, res.confidence, top5[:3], confusion_pairs,
+            )
+            return RecognitionResult(
+                text=res.text,
+                confidence=res.confidence,
+                character_confidences=res.character_confidences,
+                metadata={
+                    "recognizer": "emnist",
+                    "model": res.metadata.get("model", ""),
+                    "mode": "character",
+                    "top3": json.dumps(top5),
+                    "confusion_pairs": json.dumps(confusion_pairs),
+                }
+            )
+
+        # --- Render ---
+        raw_image = render_strokes_for_trocr(strokes)
+        logger.info(
+            "recognize: raw render %dx%d (strokes=%d points)",
+            raw_image.shape[1], raw_image.shape[0], len(strokes),
+        )
+
+        # --- Preprocess ---
+        image, cropped_image, processed_image = _preprocess_image(raw_image)
+
+        # --- Debug save ---
+        from assistive_writing_pad.recognition.debug_saver import save_debug_images
+        save_debug_images(raw_image, cropped_image, processed_image)
+
+        # --- OCR ---
+        # In character mode use a smaller token budget: a single character
+        # takes at most 2 tokens (char + EOS), so capping at 4 prevents the
+        # model from emitting long noisy sequences.
+        max_tokens = 4 if use_char_mode else self.max_new_tokens
         inputs = self._processor(images=image, return_tensors="pt")
         pixel_values = inputs.pixel_values
 
         with self._torch.no_grad():
             generated = self._model.generate(
                 pixel_values,
-                max_new_tokens=self.max_new_tokens,
+                max_new_tokens=max_tokens,
                 return_dict_in_generate=True,
                 output_scores=True,
             )
 
         raw_text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
+        confidence = _generation_confidence(generated, self._torch)
+
         text = _clean_ocr_text(raw_text)
-        if _looks_like_single_character_input([strokes]):
+        if is_single_char:
             text = _single_character_guess(text)
             hinted = _shape_hint_for_single_character([strokes], text)
             if hinted is not None:
                 text = hinted
-        confidence = _generation_confidence(generated, self._torch)
+        top3: List[Tuple[str, float]] = [(text, confidence)]
+        logger.info(
+            "recognize [word]: result=%r confidence=%.3f raw=%r",
+            text.strip(), confidence, raw_text.strip(),
+        )
+
         return RecognitionResult(
             text=text.strip(),
             confidence=confidence,
@@ -72,10 +202,16 @@ class TrOCRHandwritingRecognizer:
                 "recognizer": "trocr",
                 "model": self.model_name,
                 "raw_text": raw_text.strip(),
+                "mode": "character" if use_char_mode else "word",
+                "top3": json.dumps(top3),
             },
         )
 
-    def recognize_stroke_groups(self, stroke_groups: Sequence[Sequence[StrokePoint]]) -> RecognitionResult:
+    def recognize_stroke_groups(
+        self,
+        stroke_groups: Sequence[Sequence[StrokePoint]],
+        mode: RecognitionMode = "auto",
+    ) -> RecognitionResult:
         if not stroke_groups:
             return RecognitionResult(
                 text="",
@@ -84,52 +220,178 @@ class TrOCRHandwritingRecognizer:
             )
 
         self._ensure_loaded()
-        if _looks_like_single_character_input(stroke_groups):
+
+        # Resolve effective mode.
+        effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
+        is_single_char_input = _looks_like_single_character_input(stroke_groups)
+        use_char_mode = effective_mode == "character" or (effective_mode == "auto" and is_single_char_input)
+        logger.info(
+            "recognize_stroke_groups: mode=%s effective=%s is_single_char=%s",
+            mode, "character" if use_char_mode else "word", is_single_char_input,
+        )
+
+        if use_char_mode:
+            if self._emnist_recognizer is None:
+                from assistive_writing_pad.recognition.emnist import EMNISTCharacterRecognizer
+                self._emnist_recognizer = EMNISTCharacterRecognizer()
+            flattened = [point for stroke in stroke_groups for point in stroke]
+            res = self._emnist_recognizer.recognize(flattened)
+            top5 = [(c.character, c.confidence) for c in res.character_confidences]
+            return RecognitionResult(
+                text=res.text,
+                confidence=res.confidence,
+                character_confidences=res.character_confidences,
+                metadata={
+                    "recognizer": "emnist",
+                    "model": res.metadata.get("model", ""),
+                    "mode": "character",
+                    "top3": json.dumps(top5),
+                    "lines": "1",
+                    "line_results": json.dumps([{
+                        "line_index": 0,
+                        "text": res.text,
+                        "raw_text": res.text,
+                        "confidence": res.confidence,
+                        "stroke_groups": len(stroke_groups)
+                    }])
+                }
+            )
+
+        # Import here to keep recognition module decoupled from preprocessing
+        # at the class level while still using the new pipeline at runtime.
+        from assistive_writing_pad.preprocessing.ocr_image_ops import (
+            segment_words_horizontally,
+        )
+        from assistive_writing_pad.recognition.confusion import (
+            apply_confusion_correction,
+            restrict_to_charset,
+        )
+        from assistive_writing_pad.recognition.debug_saver import save_debug_images
+
+        if use_char_mode or is_single_char_input:
             lines = [list(stroke_groups)]
         else:
             lines = segment_strokes_into_lines(stroke_groups)
+
+        logger.info(
+            "recognize_stroke_groups: %d stroke group(s) -> %d line(s)",
+            len(stroke_groups), len(lines),
+        )
+
         line_results = []
         line_texts = []
         confidences = []
+        # top3 for the whole result (only meaningful in character mode)
+        result_top3: List[Tuple[str, float]] = []
 
         for line_index, line_groups in enumerate(lines):
-            image = render_stroke_groups_for_trocr(line_groups)
-            inputs = self._processor(images=image, return_tensors="pt")
-            with self._torch.no_grad():
-                generated = self._model.generate(
-                    inputs.pixel_values,
-                    max_new_tokens=self.max_new_tokens,
-                    return_dict_in_generate=True,
-                    output_scores=True,
+            # --- Render ---
+            raw_image = render_stroke_groups_for_trocr(line_groups)
+            logger.info(
+                "line %d: raw render %dx%d (%d stroke groups)",
+                line_index, raw_image.shape[1], raw_image.shape[0], len(line_groups),
+            )
+
+            # --- Preprocess ---
+            proc_image, cropped_image, processed_image = _preprocess_image(raw_image)
+
+            # --- Debug save ---
+            save_debug_images(
+                raw_image, cropped_image, processed_image,
+                label=f"line{line_index}",
+            )
+
+            # In character mode use a small token budget.
+            max_tokens = 4 if use_char_mode else self.max_new_tokens
+
+            # --- Optional word segmentation (word mode only) ---
+            if _WORD_SEGMENT_ENABLED and not use_char_mode:
+                word_regions = segment_words_horizontally(proc_image)
+                logger.info(
+                    "line %d: word segmentation -> %d region(s)",
+                    line_index, len(word_regions),
                 )
-            raw_text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
-            text = _clean_ocr_text(raw_text)
-            if _looks_like_single_character_input(line_groups):
+            else:
+                word_regions = [proc_image]
+
+            # --- OCR per region ---
+            word_texts: List[str] = []
+            word_confidences: List[float] = []
+            for region in word_regions:
+                inputs = self._processor(images=region, return_tensors="pt")
+                with self._torch.no_grad():
+                    generated = self._model.generate(
+                        inputs.pixel_values,
+                        max_new_tokens=max_tokens,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                    )
+                raw_text = self._processor.batch_decode(
+                    generated.sequences, skip_special_tokens=True
+                )[0]
+                word_conf = _generation_confidence(generated, self._torch)
+
+                if use_char_mode:
+                    # Character mode: restrict charset and apply confusion correction.
+                    clean_raw = restrict_to_charset(raw_text, charset="alphanum")
+                    if not clean_raw:
+                        clean_raw = _single_character_guess(_clean_ocr_text(raw_text))
+                        hinted = _shape_hint_for_single_character(line_groups, clean_raw)
+                        if hinted is not None:
+                            clean_raw = hinted
+                    word_text, top3 = apply_confusion_correction(clean_raw, word_conf, mode="character")
+                    result_top3 = top3  # save for final result
+                    logger.info(
+                        "line %d [char]: result=%r conf=%.3f top3=%r",
+                        line_index, word_text, word_conf, top3,
+                    )
+                else:
+                    word_text = _clean_ocr_text(raw_text)
+                    word_text = word_text.strip()
+
+                word_texts.append(word_text)
+                word_confidences.append(word_conf)
+
+            # Merge word results back into a line.
+            line_raw_text = " ".join(w for w in word_texts if w)
+            text = line_raw_text
+
+            # Single-character correction path for auto-mode (non-char-mode).
+            if not use_char_mode and _looks_like_single_character_input(line_groups):
                 text = _single_character_guess(text)
                 hinted = _shape_hint_for_single_character(line_groups, text)
                 if hinted is not None:
                     text = hinted
-            confidence = _generation_confidence(generated, self._torch)
+
+            confidence = float(np.mean(word_confidences)) if word_confidences else 0.0
+            logger.info(
+                "line %d: result=%r confidence=%.3f",
+                line_index, text.strip(), confidence,
+            )
+
             line_texts.append(text.strip())
             confidences.append(confidence)
             line_results.append(
                 {
                     "line_index": line_index,
                     "text": text.strip(),
-                    "raw_text": raw_text.strip(),
+                    "raw_text": line_raw_text.strip(),
                     "confidence": confidence,
                     "stroke_groups": len(line_groups),
                 }
             )
 
+        final_confidence = float(np.mean(confidences)) if confidences else 0.0
         return RecognitionResult(
             text="\n".join(text for text in line_texts if text),
-            confidence=float(np.mean(confidences)) if confidences else 0.0,
+            confidence=final_confidence,
             metadata={
                 "recognizer": "trocr",
                 "model": self.model_name,
                 "lines": str(len(lines)),
                 "line_results": json.dumps(line_results),
+                "mode": "character" if use_char_mode else "word",
+                "top3": json.dumps(result_top3),
             },
         )
 
@@ -159,11 +421,18 @@ class TrOCRHandwritingRecognizer:
 
 def render_strokes_for_trocr(
     strokes: Sequence[StrokePoint],
-    size: tuple = (384, 128),
+    size: Optional[tuple] = None,
     padding: int = 14,
 ) -> np.ndarray:
-    """Render captured strokes as a white-background RGB image for TrOCR."""
+    """Render captured strokes as a white-background RGB image for TrOCR.
 
+    The default render size has been increased from 384x128 to 768x256 to give
+    TrOCR twice the horizontal resolution.  Higher resolution preserves more
+    stroke detail and significantly reduces character confusion errors.
+    Override with AWP_TROCR_RENDER_SIZE env var (e.g. "512x192" for Pi).
+    """
+    if size is None:
+        size = _RENDER_SIZE
     width, height = size
     image = np.full((height, width, 3), 255, dtype=np.uint8)
     if not strokes:
@@ -172,21 +441,27 @@ def render_strokes_for_trocr(
     points = _scale_points(strokes, width, height, padding)
     if len(points) == 1:
         x, y = points[0]
-        _draw_dot(image, x, y, radius=2)
+        # Radius 3 matches the larger canvas; thick enough to be visible but
+        # not so thick that letters bleed into each other.
+        _draw_dot(image, x, y, radius=3)
         return image
 
     for start, end in zip(points, points[1:]):
-        _draw_line(image, start, end, radius=2)
+        _draw_line(image, start, end, radius=3)
     return image
 
 
 def render_stroke_groups_for_trocr(
     stroke_groups: Sequence[Sequence[StrokePoint]],
-    size: tuple = (384, 128),
+    size: Optional[tuple] = None,
     padding: int = 14,
 ) -> np.ndarray:
-    """Render multiple pen strokes into one OCR image without joining stroke gaps."""
+    """Render multiple pen strokes into one OCR image without joining stroke gaps.
 
+    See render_strokes_for_trocr() for notes on the default size increase.
+    """
+    if size is None:
+        size = _RENDER_SIZE
     flattened = [point for stroke in stroke_groups for point in stroke]
     width, height = size
     image = np.full((height, width, 3), 255, dtype=np.uint8)
@@ -203,12 +478,46 @@ def render_stroke_groups_for_trocr(
         scaled = [next(point_lookup) for _ in stroke]
         if len(scaled) == 1:
             x, y = scaled[0]
-            _draw_dot(image, x, y, radius=2)
+            _draw_dot(image, x, y, radius=3)
             continue
         for start, end in zip(scaled, scaled[1:]):
-            _draw_line(image, start, end, radius=2)
+            _draw_line(image, start, end, radius=3)
 
     return image
+
+
+def _preprocess_image(
+    raw_image: np.ndarray,
+) -> tuple:
+    """Run auto-crop and OCR enhancement on a rendered stroke image.
+
+    Returns a tuple of (final_image, cropped_image, processed_image) where
+    final_image is what gets fed into TrOCR and the other two are kept for
+    the debug saver.  All three are uint8 RGB arrays.
+    """
+    from assistive_writing_pad.preprocessing.ocr_image_ops import (
+        auto_crop_handwriting,
+        enhance_for_ocr,
+    )
+
+    # Stage 1 -- Auto-crop: remove the large whitespace margins so that the
+    # model's attention is focused on the actual handwriting region.
+    cropped = auto_crop_handwriting(raw_image, padding=20)
+    logger.debug(
+        "_preprocess_image: after crop %dx%d -> %dx%d",
+        raw_image.shape[1], raw_image.shape[0],
+        cropped.shape[1], cropped.shape[0],
+    )
+
+    # Stage 2 -- Enhance: adaptive threshold + contrast boost + morphological
+    # opening to produce a crisp binary image closer to TrOCR's training data.
+    processed = enhance_for_ocr(cropped)
+    logger.debug(
+        "_preprocess_image: after enhance %dx%d",
+        processed.shape[1], processed.shape[0],
+    )
+
+    return processed, cropped, processed
 
 
 def segment_strokes_into_lines(

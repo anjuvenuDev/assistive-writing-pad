@@ -78,11 +78,57 @@ HTML = """<!doctype html>
       font-weight: 700;
       letter-spacing: 0;
     }
-    .hint, #status, #confidence {
+    .hint, #status {
       color: var(--muted);
       font-size: 14px;
       line-height: 1.4;
     }
+    /* Confidence badge colours */
+    #confidence {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      transition: background 0.25s, color 0.25s;
+      background: #f0f0f0;
+      color: #555;
+    }
+    #confidence.conf-high  { background: #dcfce7; color: #15803d; }
+    #confidence.conf-med   { background: #fef9c3; color: #92400e; }
+    #confidence.conf-low   { background: #fee2e2; color: #b91c1c; }
+    /* Collapsible debug panel (OCR raw output) */
+    details.debug-panel {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    details.debug-panel summary {
+      cursor: pointer;
+      user-select: none;
+      font-weight: 600;
+    }
+    #raw-text {
+      margin-top: 6px;
+      padding: 8px 10px;
+      background: #f8f9fb;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    /* Canvas
+     *
+     * touch-action: none  -- hand full pointer control to JS; without this
+     *                        the browser steals touchmove for scroll/zoom and
+     *                        fires pointercancel, aborting the stroke.
+     * pointer-events: auto -- must NOT be 'none'; that disables all input.
+     * position: relative + z-index: 1 -- ensure the canvas is not buried
+     *                        under any sibling overlay element.
+     */
     #pad {
       display: block;
       width: 100%;
@@ -91,7 +137,10 @@ HTML = """<!doctype html>
       border-radius: 8px;
       background: #fff;
       touch-action: none;
+      pointer-events: auto;
       cursor: crosshair;
+      position: relative;
+      z-index: 1;
     }
     .toolbar {
       display: flex;
@@ -141,6 +190,140 @@ HTML = """<!doctype html>
       padding: 2px 5px;
       color: #344054;
     }
+    /* Pointer input diagnostics panel */
+    #pointer-debug {
+      margin-top: 10px;
+      padding: 7px 10px;
+      background: #f1f5f9;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #334155;
+      line-height: 1.6;
+    }
+    #pointer-debug .pdl { display: flex; gap: 12px; flex-wrap: wrap; }
+    #pointer-debug .pdl span { white-space: nowrap; }
+    #pointer-debug .drawing-yes { color: #15803d; font-weight: 700; }
+    #pointer-debug .drawing-no  { color: #64748b; }
+    #pointer-log {
+      margin-top: 8px;
+      padding: 6px 8px;
+      background: #0f172a;
+      color: #38bdf8;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      height: 85px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      text-align: left;
+    }
+    /* Mode selector */
+    .mode-selector {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      align-items: center;
+    }
+    .mode-label {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+    .mode-btn {
+      border: 1.5px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      min-height: 30px;
+    }
+    .mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .mode-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    /* Top-3 predictions panel */
+    #top3-panel {
+      margin-top: 12px;
+    }
+    .top3-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .top3-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .top3-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .top3-item:hover { background: #e8f0fe; border-color: var(--accent); }
+    .top3-rank {
+      font-size: 11px;
+      color: var(--muted);
+      width: 14px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .top3-char {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--ink);
+      width: 32px;
+      text-align: center;
+      flex-shrink: 0;
+      font-family: monospace;
+    }
+    .top3-bar-wrap {
+      flex: 1;
+      background: #e2e8f0;
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+    .top3-bar {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.3s ease;
+    }
+    .top3-bar.rank1 { background: #2563eb; }
+    .top3-bar.rank2 { background: #60a5fa; }
+    .top3-bar.rank3 { background: #93c5fd; }
+    .top3-bar.rank4 { background: #bfdbfe; }
+    .top3-bar.rank5 { background: #dbeafe; }
+    .top3-pct {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      width: 36px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .top3-item.top3-hidden { display: none; }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; }
       #pad { height: 360px; }
@@ -159,6 +342,24 @@ HTML = """<!doctype html>
         <div class="hint">Write a word or short line. Recognition runs after you pause.</div>
       </div>
       <canvas id="pad"></canvas>
+      <!-- Pointer diagnostics: always visible so input problems are immediately obvious -->
+      <div id="pointer-debug">
+        <div class="pdl">
+          <span>Type: <b id="pd-type">&mdash;</b></span>
+          <span>X: <b id="pd-x">&mdash;</b></span>
+          <span>Y: <b id="pd-y">&mdash;</b></span>
+          <span>Drawing: <b id="pd-drawing" class="drawing-no">no</b></span>
+          <span>Strokes: <b id="pd-strokes">0</b></span>
+        </div>
+        <div id="pointer-log">Canvas event logs will appear here...</div>
+      </div>
+      <!-- Mode selector -->
+      <div class="mode-selector">
+        <span class="mode-label">Mode:</span>
+        <button class="mode-btn active" id="mode-auto"   data-mode="auto">Auto</button>
+        <button class="mode-btn"        id="mode-char"   data-mode="character">Character</button>
+        <button class="mode-btn"        id="mode-word"   data-mode="word">Word</button>
+      </div>
       <div class="toolbar">
         <button class="primary" id="recognize">Recognize Now</button>
         <button id="clearInk">Clear Ink</button>
@@ -170,9 +371,49 @@ HTML = """<!doctype html>
     <section>
       <div class="section-title">
         <h2>Recognized Text</h2>
-        <div id="confidence">Confidence: -</div>
+        <span id="confidence">&mdash;</span>
       </div>
       <textarea id="recognized" spellcheck="false"></textarea>
+      <!-- Top predictions panel (up to 5, sourced from EMNIST in character mode) -->
+      <div id="top3-panel">
+        <div class="top3-title">Top Predictions</div>
+        <div class="top3-list" id="top3-list">
+          <div class="top3-item top3-hidden" id="top3-0" data-rank="0">
+            <span class="top3-rank">1</span>
+            <span class="top3-char" id="top3-char-0">&mdash;</span>
+            <div class="top3-bar-wrap"><div class="top3-bar rank1" id="top3-bar-0" style="width:0%"></div></div>
+            <span class="top3-pct" id="top3-pct-0">0%</span>
+          </div>
+          <div class="top3-item top3-hidden" id="top3-1" data-rank="1">
+            <span class="top3-rank">2</span>
+            <span class="top3-char" id="top3-char-1">&mdash;</span>
+            <div class="top3-bar-wrap"><div class="top3-bar rank2" id="top3-bar-1" style="width:0%"></div></div>
+            <span class="top3-pct" id="top3-pct-1">0%</span>
+          </div>
+          <div class="top3-item top3-hidden" id="top3-2" data-rank="2">
+            <span class="top3-rank">3</span>
+            <span class="top3-char" id="top3-char-2">&mdash;</span>
+            <div class="top3-bar-wrap"><div class="top3-bar rank3" id="top3-bar-2" style="width:0%"></div></div>
+            <span class="top3-pct" id="top3-pct-2">0%</span>
+          </div>
+          <div class="top3-item top3-hidden" id="top3-3" data-rank="3">
+            <span class="top3-rank">4</span>
+            <span class="top3-char" id="top3-char-3">&mdash;</span>
+            <div class="top3-bar-wrap"><div class="top3-bar rank4" id="top3-bar-3" style="width:0%"></div></div>
+            <span class="top3-pct" id="top3-pct-3">0%</span>
+          </div>
+          <div class="top3-item top3-hidden" id="top3-4" data-rank="4">
+            <span class="top3-rank">5</span>
+            <span class="top3-char" id="top3-char-4">&mdash;</span>
+            <div class="top3-bar-wrap"><div class="top3-bar rank5" id="top3-bar-4" style="width:0%"></div></div>
+            <span class="top3-pct" id="top3-pct-4">0%</span>
+          </div>
+        </div>
+      </div>
+      <details class="debug-panel">
+        <summary>Debug: raw OCR output</summary>
+        <div id="raw-text">No recognition yet.</div>
+      </details>
       <div class="setup">
         Pretrained OCR uses <code>microsoft/trocr-small-handwritten</code> with line-aware
         segmentation. If recognition reports missing dependencies, create a Python 3.10
@@ -181,76 +422,269 @@ HTML = """<!doctype html>
     </section>
   </main>
   <script>
-    const canvas = document.getElementById("pad");
-    const ctx = canvas.getContext("2d");
-    const statusEl = document.getElementById("status");
+    /* -----------------------------------------------------------------------
+     * Element references
+     * --------------------------------------------------------------------- */
+    const canvas       = document.getElementById("pad");
+    const ctx          = canvas.getContext("2d");
+    const statusEl     = document.getElementById("status");
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
-    let strokes = [];
-    let currentStroke = [];
-    let drawing = false;
-    let last = null;
-    let startedAt = 0;
-    let recognizeTimer = null;
+    const rawTextEl    = document.getElementById("raw-text");
+    const pdType       = document.getElementById("pd-type");
+    const pdX          = document.getElementById("pd-x");
+    const pdY          = document.getElementById("pd-y");
+    const pdDrawing    = document.getElementById("pd-drawing");
+    const pdStrokes    = document.getElementById("pd-strokes");
 
-    function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      const previous = ctx.getImageData(0, 0, canvas.width || 1, canvas.height || 1);
-      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, rect.width, rect.height);
-      try { ctx.putImageData(previous, 0, 0); } catch (_err) {}
-      ctx.lineWidth = 4;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+    /* -----------------------------------------------------------------------
+     * State
+     * --------------------------------------------------------------------- */
+    let strokes        = [];    // completed strokes sent to OCR
+    let currentStroke  = [];    // points in the stroke currently being drawn
+    let drawing        = false;
+    let last           = null;  // last canvas-space point {x, y, ...}
+    let startedAt      = 0;     // performance.now() at stroke start
+    let recognizeTimer = null;
+    let currentMode    = "auto"; // "auto" | "character" | "word"
+
+    /* -----------------------------------------------------------------------
+     * Diagnostics logger
+     * --------------------------------------------------------------------- */
+    const logEl = document.getElementById("pointer-log");
+    function logMsg(msg) {
+      const time = new Date().toTimeString().split(' ')[0];
+      logEl.innerHTML = "[" + time + "] " + msg + "<br>" + logEl.innerHTML;
+      const lines = logEl.innerHTML.split("<br>");
+      if (lines.length > 15) {
+        logEl.innerHTML = lines.slice(0, 15).join("<br>");
+      }
+    }
+    window.addEventListener("error", (e) => {
+      logMsg("JS ERR: " + e.message + " at " + e.filename + ":" + e.lineno);
+    });
+
+    /* -----------------------------------------------------------------------
+     * Canvas initialisation and resize
+     *
+     * ROOT CAUSE OF THE REGRESSION — resizeCanvas() bug:
+     *
+     *   The previous code called:
+     *     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);   // set DPR scale
+     *     ctx.putImageData(previous, 0, 0);              // restore pixels
+     *
+     *   putImageData() ignores the current transform and writes pixels at
+     *   raw device-pixel offsets.  After the setTransform call, (0,0) in
+     *   device pixels is the top-left corner of the backing buffer — correct
+     *   only when ratio=1.  On HiDPI screens (MacBook trackpads, Surface,
+     *   high-DPI laptop displays) where ratio=2, the restored pixels land in
+     *   the wrong position, making the canvas appear blank (all white).
+     *   A blank canvas visually looks identical to "input not working" which
+     *   is why drawing appeared broken on trackpad-equipped laptops.
+     *
+     * FIX:
+     *   1. Reset transform to identity BEFORE reading/restoring pixel data.
+     *   2. Flood-fill white at device-pixel scale (no transform).
+     *   3. Restore pixel data at identity (correct position on all DPRs).
+     *   4. Re-apply DPR transform for subsequent draw calls.
+     *   5. Re-apply drawing style (lineWidth etc.) — canvas.width = N resets
+     *      the entire 2D context state including these properties.
+     * --------------------------------------------------------------------- */
+    function applyDrawingStyle() {
+      ctx.lineWidth   = 4;
+      ctx.lineCap     = "round";
+      ctx.lineJoin    = "round";
       ctx.strokeStyle = "#111827";
+      ctx.fillStyle   = "#111827";  // for arc-based fill draw in move()
     }
 
+    function resizeCanvas() {
+      const rect  = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+
+      // Step 1: reset to identity so getImageData captures device pixels.
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const prevW = canvas.width  || 1;
+      const prevH = canvas.height || 1;
+      let previous = null;
+      try { previous = ctx.getImageData(0, 0, prevW, prevH); } catch (_) {}
+
+      // Step 2: resize backing buffer to physical pixel dimensions.
+      canvas.width  = Math.max(1, Math.floor(rect.width  * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+
+      // Step 3: clear at identity (device-pixel space).
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Step 4: restore previous content at identity (correct on all DPRs).
+      if (previous) {
+        try { ctx.putImageData(previous, 0, 0); } catch (_) {}
+      }
+
+      // Step 5: re-apply DPR scale for subsequent draw calls (CSS px space).
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+      // Step 6: re-apply drawing style (reset by canvas.width assignment).
+      applyDrawingStyle();
+    }
+
+    /* -----------------------------------------------------------------------
+     * Coordinate helper
+     * --------------------------------------------------------------------- */
+
+    /**
+     * Convert a PointerEvent into a canvas-space point.
+     * getBoundingClientRect() is called fresh every time so coordinates
+     * stay correct even after layout shifts (address bar hiding on mobile,
+     * window resize between events, etc.).
+     */
     function canvasPoint(event) {
       const rect = canvas.getBoundingClientRect();
       return {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
         timestamp_ms: Math.round(performance.now() - startedAt),
-        pressure: event.pressure && event.pressure > 0 ? event.pressure : 1.0
+        pressure: (event.pressure != null && event.pressure > 0) ? event.pressure : 1.0
       };
     }
 
+    /** Refresh the pointer diagnostics panel. */
+    function updatePointerDebug(event, isDrawing) {
+      const rect = canvas.getBoundingClientRect();
+      pdType.textContent    = event.pointerType || "unknown";
+      pdX.textContent       = (event.clientX - rect.left).toFixed(1);
+      pdY.textContent       = (event.clientY - rect.top).toFixed(1);
+      pdDrawing.textContent = isDrawing ? "yes" : "no";
+      pdDrawing.className   = isDrawing ? "drawing-yes" : "drawing-no";
+      pdStrokes.textContent = strokes.length;
+    }
+
+    /* -----------------------------------------------------------------------
+     * Pointer event handlers
+     *
+     * We use the Pointer Events API (W3C Level 2) — the unified model for:
+     *   - mouse / left-click drag
+     *   - laptop trackpad click-drag
+     *   - touchscreen single-finger draw
+     *   - stylus / pen (Wacom, Surface Pen, Huion, Apple Pencil via WKWebView)
+     *
+     * Critical rules observed here:
+     *   A. setPointerCapture(id)    in pointerdown  — keeps events arriving
+     *      even when pointer leaves canvas bounds during a fast stroke.
+     *   B. releasePointerCapture(id) in pointerup AND pointercancel — without
+     *      this the capture persists into the next gesture, causing browsers
+     *      to silently skip re-issuing gotpointercapture, which on mouse /
+     *      trackpad breaks subsequent strokes.  THIS WAS THE PRIMARY BUG.
+     *   C. event.preventDefault() in pointerdown + pointermove — suppresses
+     *      the browser's touch-scroll and text-selection defaults.
+     *      NOT called in pointerup — preventing default there blocks click
+     *      events on some browsers (e.g. toolbar buttons right after a stroke).
+     *   D. touch-action: none on the canvas (CSS above) — prevents the
+     *      browser from starting its own scroll/pinch gesture on the canvas,
+     *      which would fire pointercancel and abort the stroke.
+     * --------------------------------------------------------------------- */
+
     function start(event) {
+      logMsg("down: type=" + event.pointerType + " btn=" + event.button + " btns=" + event.buttons + " id=" + event.pointerId);
+      // Ignore non-primary buttons (right-click, middle-click, eraser end).
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        logMsg("ignored non-left click down");
+        return;
+      }
+
+      console.log("[AWP] pointerdown  type:", event.pointerType,
+                  " id:", event.pointerId,
+                  " x:", event.clientX.toFixed(1),
+                  " y:", event.clientY.toFixed(1));
+
       drawing = true;
       startedAt = performance.now();
       currentStroke = [];
       last = canvasPoint(event);
       currentStroke.push(last);
-      canvas.setPointerCapture(event.pointerId);
+
+      // Rule A: capture pointer.
+      try {
+        canvas.setPointerCapture(event.pointerId);
+        logMsg("pointer captured: " + event.pointerId);
+      } catch (err) {
+        logMsg("capture failed: " + err.message);
+      }
+
+      updatePointerDebug(event, true);
       event.preventDefault();
     }
 
     function move(event) {
+      // Always update diagnostics so "is the canvas receiving events?" is
+      // immediately visible, even when not in a drawing stroke.
+      updatePointerDebug(event, drawing);
+
       if (!drawing) return;
+
+      logMsg("move: x=" + event.clientX.toFixed(0) + " y=" + event.clientY.toFixed(0) + " btns=" + event.buttons);
+
+      console.log("[AWP] pointermove  type:", event.pointerType,
+                  " x:", event.clientX.toFixed(1),
+                  " y:", event.clientY.toFixed(1));
+
       const point = canvasPoint(event);
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(point.x, point.y);
-      ctx.stroke();
+
+      // Draw a filled circle path between last and current point.
+      // Using fillRect-based dots is more reliable across Windows browsers
+      // than stroke() which can miss events if the OS throttles them.
+      const r = 3;  // half-width in CSS pixels (matching backend render radius)
+      const steps = Math.max(1, Math.ceil(
+        Math.hypot(point.x - last.x, point.y - last.y) / r
+      ));
+      for (let s = 0; s <= steps; s++) {
+        const t  = s / steps;
+        const px = last.x + (point.x - last.x) * t;
+        const py = last.y + (point.y - last.y) * t;
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       currentStroke.push(point);
       last = point;
-      event.preventDefault();
+
+      event.preventDefault();  // Rule C
     }
 
     function finish(event) {
+      logMsg("up/cancel: type=" + event.pointerType + " id=" + event.pointerId);
+      console.log("[AWP] pointerup/cancel  type:", event.pointerType,
+                  " id:", event.pointerId);
+
+      // Rule B: release pointer capture BEFORE checking drawing state so the
+      // capture is freed even if drawing was already false (e.g. a cancel
+      // that arrived after a duplicate finish).
+      try {
+        canvas.releasePointerCapture(event.pointerId);
+        logMsg("pointer released: " + event.pointerId);
+      } catch (_) {
+        // Throws if pointerId is not captured by this element — safe to ignore.
+      }
+
       if (!drawing) return;
+
       drawing = false;
       currentStroke.push(canvasPoint(event));
       strokes.push(currentStroke);
       currentStroke = [];
       last = null;
+
+      updatePointerDebug(event, false);
       scheduleRecognition();
-      event.preventDefault();
+      // Rule C (inverse): no preventDefault on pointerup — would block clicks.
     }
+
+    /* -----------------------------------------------------------------------
+     * OCR recognition
+     * --------------------------------------------------------------------- */
 
     function scheduleRecognition() {
       if (recognizeTimer) clearTimeout(recognizeTimer);
@@ -262,49 +696,158 @@ HTML = """<!doctype html>
         statusEl.textContent = "Write on the pad first.";
         return;
       }
-      statusEl.textContent = "Recognizing...";
-      confidenceEl.textContent = "Confidence: -";
+      statusEl.textContent = "Recognizing\u2026";
+      confidenceEl.textContent = "\u2014";
+      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      console.log("[AWP] recognize mode:", currentMode);
       try {
         const response = await fetch("/api/recognize", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({strokes})
+          body: JSON.stringify({strokes, mode: currentMode})
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
         recognizedEl.value = result.text || "";
-        confidenceEl.textContent = `Confidence: ${Number(result.confidence || 0).toFixed(2)}`;
-        statusEl.textContent = result.status || "Recognized";
-      } catch (error) {
-        statusEl.textContent = error.message;
+        updateConfidenceBadge(Number(result.confidence || 0));
+        const usedMode = result.mode || currentMode;
+        statusEl.textContent = (result.status || "Recognized") + "  [" + usedMode + " mode]";
+        console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "top5:", result.top3);
+        // Surface raw OCR output / recognizer info in the debug panel.
+        const meta = result.metadata || {};
+        const recognizerName = meta.recognizer || "trocr";
+        const lineResults = meta.line_results ? JSON.parse(meta.line_results) : [];
+        const rawLines = lineResults
+          .map(l => "Line " + l.line_index + ": " + (l.raw_text || "(empty)"))
+          .join("\\n");
+        rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || meta.raw_text || result.text || "(none)");
+        pdStrokes.textContent = strokes.length;
+        // Render top predictions (up to 5 in character mode via EMNIST).
+        renderTop3(result.top3 || []);
+      } catch (err) {
+        statusEl.textContent = err.message;
       }
+    }
+
+    /**
+     * Colour-coded confidence badge.
+     *  > 0.85  -> green  (high)
+     *  0.65-0.85 -> yellow (medium)
+     *  < 0.65  -> red    (low — needs review)
+     */
+    function updateConfidenceBadge(value) {
+      const pct = Math.round(value * 100);
+      confidenceEl.textContent = "Confidence: " + pct + "%";
+      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      if (value > 0.85) {
+        confidenceEl.classList.add("conf-high");
+      } else if (value >= 0.65) {
+        confidenceEl.classList.add("conf-med");
+      } else {
+        confidenceEl.classList.add("conf-low");
+      }
+    }
+
+    /**
+     * Render up to 5 candidate predictions.
+     * In character mode (EMNIST), top3 is an array of up to 5 [char, confidence] pairs.
+     * In word mode (TrOCR), top3 has 1 entry.
+     * Clicking any prediction card inserts that character into the recognized textarea.
+     */
+    function renderTop3(top3) {
+      const MAX_SLOTS = 5;
+      for (let i = 0; i < MAX_SLOTS; i++) {
+        const item   = document.getElementById("top3-" + i);
+        const charEl = document.getElementById("top3-char-" + i);
+        const barEl  = document.getElementById("top3-bar-" + i);
+        const pctEl  = document.getElementById("top3-pct-" + i);
+        if (!item) continue;  // slot may not exist yet
+        if (i < top3.length) {
+          const [ch, conf] = top3[i];
+          charEl.textContent = ch || "?";
+          const pct = Math.min(100, Math.max(0, Math.round((conf || 0) * 100)));
+          barEl.style.width  = pct + "%";
+          pctEl.textContent  = pct + "%";
+          item.classList.remove("top3-hidden");
+          // Click: replace the last character in textarea with this prediction.
+          item.onclick = () => {
+            const val = recognizedEl.value;
+            // If recognizedEl already ends with the top-1 char, replace it; otherwise append.
+            recognizedEl.value = (val.trimEnd() || "");
+            if (recognizedEl.value.length > 0) recognizedEl.value += " ";
+            recognizedEl.value += ch;
+          };
+        } else {
+          item.classList.add("top3-hidden");
+          item.onclick = null;
+        }
+      }
+    }
+
+    /** Wire the mode selector buttons. */
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll(".mode-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.mode === mode);
+      });
+      console.log("[AWP] mode changed to:", mode);
     }
 
     function clearInk() {
       strokes = [];
       currentStroke = [];
+
+      // Clear at device-pixel scale (identity transform), then re-apply DPR.
+      const ratio = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = "#ffffff";
-      const rect = canvas.getBoundingClientRect();
-      ctx.fillRect(0, 0, rect.width, rect.height);
-      confidenceEl.textContent = "Confidence: -";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      applyDrawingStyle();
+
+      confidenceEl.textContent = "\u2014";
+      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      rawTextEl.textContent = "No recognition yet.";
       statusEl.textContent = "Ink cleared";
+      pdStrokes.textContent = "0";
+      // Clear top-3 panel.
+      renderTop3([]);
     }
 
+    /* -----------------------------------------------------------------------
+     * Event wiring
+     * --------------------------------------------------------------------- */
     window.addEventListener("resize", resizeCanvas);
-    canvas.addEventListener("pointerdown", start);
-    canvas.addEventListener("pointermove", move);
-    canvas.addEventListener("pointerup", finish);
+
+    // Pointer Events API: mouse + trackpad + touch + pen in one model.
+    canvas.addEventListener("pointerdown",   start);
+    canvas.addEventListener("pointermove",   move);
+    canvas.addEventListener("pointerup",     finish);
     canvas.addEventListener("pointercancel", finish);
+
+    // Block wheel/scroll on the canvas so trackpad two-finger scroll
+    // never triggers pointercancel on the active drawing stroke.
+    canvas.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+
+    // Toolbar buttons
     document.getElementById("recognize").addEventListener("click", recognize);
     document.getElementById("clearInk").addEventListener("click", clearInk);
-    document.getElementById("space").addEventListener("click", () => recognizedEl.value += " ");
+    document.getElementById("space").addEventListener("click", () => { recognizedEl.value += " "; });
     document.getElementById("backspace").addEventListener("click", () => {
       recognizedEl.value = recognizedEl.value.slice(0, -1);
     });
     document.getElementById("clearText").addEventListener("click", () => {
       recognizedEl.value = "";
     });
+
+    // Mode selector buttons.
+    document.querySelectorAll(".mode-btn").forEach(btn => {
+      btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    });
+
+    // Initial canvas setup.
     resizeCanvas();
+    renderTop3([]);  // initialise top-3 panel in hidden state
   </script>
 </body>
 </html>
@@ -317,12 +860,24 @@ class RecognitionService:
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)
-        result = self.recognizer.recognize_stroke_groups(stroke_groups)
+        # Accept mode from the request payload; default to "auto".
+        mode = payload.get("mode", "auto")
+        if mode not in ("auto", "character", "word"):
+            mode = "auto"
+        result = self.recognizer.recognize_stroke_groups(stroke_groups, mode=mode)
+        # Parse top3 from metadata (list of [char, confidence] pairs).
+        top3_raw = result.metadata.get("top3", "[]")
+        try:
+            top3 = json.loads(top3_raw)
+        except (json.JSONDecodeError, TypeError):
+            top3 = []
         return {
             "text": result.text,
             "confidence": result.confidence,
             "status": "Recognized handwriting with pretrained OCR.",
             "metadata": result.metadata,
+            "top3": top3,
+            "mode": result.metadata.get("mode", mode),
         }
 
 
