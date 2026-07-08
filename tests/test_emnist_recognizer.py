@@ -235,3 +235,61 @@ class TestEMNISTLazyLoading:
         rec.recognize(_make_stroke())
         # _load_model should not be called at all since _pipeline is already True
         assert load_count["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression Test (Real Model)
+# ---------------------------------------------------------------------------
+
+class TestEMNISTRegression:
+    def test_upright_character_recognition_regression(self) -> None:
+        """Verify that a normal upright 'L' stroke sequence is recognized as 'L' or 'l'."""
+        rec = EMNISTCharacterRecognizer()
+        
+        # Dense capital 'L' stroke points
+        pts = [
+            (10, 10), (10, 20), (10, 30), (10, 40), (10, 50),
+            (10, 60), (10, 70), (10, 80), (10, 90),
+            (20, 90), (30, 90), (40, 90), (50, 90)
+        ]
+        strokes = [
+            StrokePoint(x=float(x), y=float(y), timestamp_ms=i * 16, pressure=1.0)
+            for i, (x, y) in enumerate(pts)
+        ]
+        
+        result = rec.recognize(strokes)
+        
+        if not rec._use_fallback:
+            assert result.text.upper() == "L"
+            assert result.confidence > 0.4
+        else:
+            # If model weights are not available in test environment, fallback should still return candidates
+            assert len(result.character_confidences) == 5
+
+    def test_upright_t_recognition_regression(self) -> None:
+        """Verify that a normal upright 't' stroke sequence is recognized as 't' or 'T'."""
+        rec = EMNISTCharacterRecognizer()
+        
+        # Dense lowercase 't' stroke points
+        # vertical stem: (50, 15) to (50, 75)
+        # crossbar: (30, 35) to (70, 35)
+        pts_t = []
+        for t in range(16):
+            alpha = t / 15
+            pts_t.append((50.0, 15.0 + 60.0 * alpha))
+        for t in range(16):
+            alpha = t / 15
+            pts_t.append((30.0 + 40.0 * alpha, 35.0))
+            
+        strokes = [
+            StrokePoint(x=float(x), y=float(y), timestamp_ms=i * 16, pressure=1.0)
+            for i, (x, y) in enumerate(pts_t)
+        ]
+        
+        result = rec.recognize(strokes)
+        
+        if not rec._use_fallback:
+            assert result.text.upper() == "T"
+            assert result.confidence > 0.4
+        else:
+            assert len(result.character_confidences) == 5

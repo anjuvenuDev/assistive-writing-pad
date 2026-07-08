@@ -272,6 +272,14 @@ class EMNISTCharacterRecognizer:
 
         # img28: (28, 28) float32, ink=1 bg=0
         # EMNIST training convention: white ink on black background (same as our preprocessor)
+        try:
+            debug_dir = Path("data/debug")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            img_uint8 = (img28 * 255.0).clip(0, 255).astype(np.uint8)
+            Image.fromarray(img_uint8).save(debug_dir / "emnist_input.png")
+        except Exception as exc:
+            logger.warning("Failed to save debug image: %s", exc)
+
         tensor = torch.from_numpy(img28).unsqueeze(0).unsqueeze(0).float()  # (1, 1, 28, 28)
 
         with torch.no_grad():
