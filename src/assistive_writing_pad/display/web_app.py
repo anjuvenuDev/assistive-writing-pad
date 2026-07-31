@@ -6,9 +6,12 @@ import argparse
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from assistive_writing_pad.contracts import StrokePoint
+from assistive_writing_pad.config.settings import RuntimeSettings
+from assistive_writing_pad.contracts import CorrectionResult, PipelineResult, StrokePoint
+from assistive_writing_pad.correction.contextual import ContextualCorrector
+from assistive_writing_pad.pipeline import WritingPipeline
 from assistive_writing_pad.recognition.trocr import RecognitionUnavailable, TrOCRHandwritingRecognizer
 
 
@@ -256,6 +259,64 @@ HTML = """<!doctype html>
     #top3-panel {
       margin-top: 12px;
     }
+    #correction-panel {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      overflow: hidden;
+    }
+    .correction-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    #correction-confidence {
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 600;
+    }
+    #correction-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .correction-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-top: 1px solid #eef2f7;
+      font-size: 14px;
+    }
+    .correction-row:first-child { border-top: 0; }
+    .correction-word {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .correction-before {
+      color: #b42318;
+      text-decoration: line-through;
+    }
+    .correction-after {
+      color: #067647;
+      font-weight: 700;
+    }
+    .correction-arrow { color: var(--muted); }
+    .correction-empty {
+      padding: 10px;
+      color: var(--muted);
+      font-size: 14px;
+    }
     .top3-title {
       font-size: 12px;
       font-weight: 700;
@@ -374,6 +435,15 @@ HTML = """<!doctype html>
         <span id="confidence">&mdash;</span>
       </div>
       <textarea id="recognized" spellcheck="false"></textarea>
+      <div id="correction-panel">
+        <div class="correction-header">
+          <span>Corrections</span>
+          <span id="correction-confidence">&mdash;</span>
+        </div>
+        <div id="correction-list">
+          <div class="correction-empty">No corrections yet.</div>
+        </div>
+      </div>
       <!-- Top predictions panel (up to 5, sourced from EMNIST in character mode) -->
       <div id="top3-panel">
         <div class="top3-title">Top Predictions</div>
@@ -431,6 +501,8 @@ HTML = """<!doctype html>
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
     const rawTextEl    = document.getElementById("raw-text");
+    const correctionConfidenceEl = document.getElementById("correction-confidence");
+    const correctionListEl = document.getElementById("correction-list");
     const pdType       = document.getElementById("pd-type");
     const pdX          = document.getElementById("pd-x");
     const pdY          = document.getElementById("pd-y");
@@ -708,11 +780,15 @@ HTML = """<!doctype html>
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
-        recognizedEl.value = result.text || "";
-        updateConfidenceBadge(Number(result.confidence || 0));
+        recognizedEl.value = result.corrected_text || result.text || "";
+        updateConfidenceBadge(
+          Number(result.confidence || 0),
+          Number(result.correction_confidence || 1)
+        );
         const usedMode = result.mode || currentMode;
-        statusEl.textContent = (result.status || "Recognized") + "  [" + usedMode + " mode]";
-        console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "top5:", result.top3);
+        const reviewSuffix = result.needs_review ? "  Review" : "";
+        statusEl.textContent = (result.status || "Recognized") + "  [" + usedMode + " mode]" + reviewSuffix;
+        console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "corrections:", result.corrections, "top5:", result.top3);
         // Surface raw OCR output / recognizer info in the debug panel.
         const meta = result.metadata || {};
         const recognizerName = meta.recognizer || "trocr";
@@ -720,8 +796,10 @@ HTML = """<!doctype html>
         const rawLines = lineResults
           .map(l => "Line " + l.line_index + ": " + (l.raw_text || "(empty)"))
           .join("\\n");
-        rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || meta.raw_text || result.text || "(none)");
+        const rawRecognized = result.recognized_text || meta.raw_text || result.text || "(none)";
+        rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
         pdStrokes.textContent = strokes.length;
+        renderCorrections(result.corrections || []);
         // Render top predictions (up to 5 in character mode via EMNIST).
         renderTop3(result.top3 || []);
       } catch (err) {
@@ -735,9 +813,11 @@ HTML = """<!doctype html>
      *  0.65-0.85 -> yellow (medium)
      *  < 0.65  -> red    (low — needs review)
      */
-    function updateConfidenceBadge(value) {
+    function updateConfidenceBadge(value, correctionValue) {
       const pct = Math.round(value * 100);
-      confidenceEl.textContent = "Confidence: " + pct + "%";
+      const correctionPct = Math.round(correctionValue * 100);
+      confidenceEl.textContent = "Recognition: " + pct + "%";
+      correctionConfidenceEl.textContent = "Correction: " + correctionPct + "%";
       confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
       if (value > 0.85) {
         confidenceEl.classList.add("conf-high");
@@ -746,6 +826,41 @@ HTML = """<!doctype html>
       } else {
         confidenceEl.classList.add("conf-low");
       }
+    }
+
+    function renderCorrections(corrections) {
+      correctionListEl.innerHTML = "";
+      if (!corrections.length) {
+        const empty = document.createElement("div");
+        empty.className = "correction-empty";
+        empty.textContent = "No changes.";
+        correctionListEl.appendChild(empty);
+        return;
+      }
+
+      corrections.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "correction-row";
+
+        const before = document.createElement("span");
+        before.className = "correction-word correction-before";
+        before.textContent = item.original || "";
+
+        const arrow = document.createElement("span");
+        arrow.className = "correction-arrow";
+        arrow.textContent = "->";
+
+        const after = document.createElement("span");
+        after.className = "correction-word correction-after";
+        const pct = Math.round(Number(item.confidence || 0) * 100);
+        after.textContent = (item.corrected || "") + "  " + pct + "%";
+
+        row.title = item.reason || "";
+        row.appendChild(before);
+        row.appendChild(arrow);
+        row.appendChild(after);
+        correctionListEl.appendChild(row);
+      });
     }
 
     /**
@@ -807,9 +922,11 @@ HTML = """<!doctype html>
 
       confidenceEl.textContent = "\u2014";
       confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      correctionConfidenceEl.textContent = "\u2014";
       rawTextEl.textContent = "No recognition yet.";
       statusEl.textContent = "Ink cleared";
       pdStrokes.textContent = "0";
+      renderCorrections([]);
       // Clear top-3 panel.
       renderTop3([]);
     }
@@ -847,6 +964,7 @@ HTML = """<!doctype html>
 
     // Initial canvas setup.
     resizeCanvas();
+    renderCorrections([]);
     renderTop3([]);  // initialise top-3 panel in hidden state
   </script>
 </body>
@@ -855,8 +973,19 @@ HTML = """<!doctype html>
 
 
 class RecognitionService:
-    def __init__(self) -> None:
-        self.recognizer = TrOCRHandwritingRecognizer()
+    def __init__(
+        self,
+        recognizer: Optional[Any] = None,
+        corrector: Optional[Any] = None,
+        settings: Optional[RuntimeSettings] = None,
+    ) -> None:
+        self.settings = settings or RuntimeSettings.from_env()
+        self.recognizer = recognizer or TrOCRHandwritingRecognizer()
+        self.pipeline = WritingPipeline(
+            recognizer=self.recognizer,
+            corrector=corrector or ContextualCorrector.from_settings(self.settings),
+            settings=self.settings,
+        )
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)
@@ -865,20 +994,48 @@ class RecognitionService:
         if mode not in ("auto", "character", "word"):
             mode = "auto"
         result = self.recognizer.recognize_stroke_groups(stroke_groups, mode=mode)
+        pipeline_result = self.pipeline.process_recognition(result)
         # Parse top3 from metadata (list of [char, confidence] pairs).
         top3_raw = result.metadata.get("top3", "[]")
         try:
             top3 = json.loads(top3_raw)
         except (json.JSONDecodeError, TypeError):
             top3 = []
+        correction = pipeline_result.correction
         return {
-            "text": result.text,
+            "text": correction.corrected_text,
+            "recognized_text": result.text,
+            "corrected_text": correction.corrected_text,
             "confidence": result.confidence,
-            "status": "Recognized handwriting with pretrained OCR.",
+            "correction_confidence": correction.confidence,
+            "corrections": corrections_payload(correction),
+            "needs_review": pipeline_result.needs_review,
+            "review_reason": pipeline_result.review_reason,
+            "status": status_message(pipeline_result),
             "metadata": result.metadata,
             "top3": top3,
             "mode": result.metadata.get("mode", mode),
         }
+
+
+def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
+    return [
+        {
+            "original": correction.original,
+            "corrected": correction.corrected,
+            "confidence": correction.confidence,
+            "reason": correction.reason,
+        }
+        for correction in result.corrections
+    ]
+
+
+def status_message(result: PipelineResult) -> str:
+    if result.needs_review:
+        return "Recognized and corrected handwriting; review recommended."
+    if result.correction.changed:
+        return "Recognized and corrected handwriting."
+    return "Recognized handwriting."
 
 
 def stroke_groups_from_payload(payload: Dict[str, Any]) -> List[List[StrokePoint]]:
