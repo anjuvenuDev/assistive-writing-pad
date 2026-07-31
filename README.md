@@ -23,9 +23,12 @@ What has been done so far:
 - A rule-based correction layer for early dysgraphia-style error patterns
 - A Tkinter handwriting app and a browser-based web UI for writing, recognition, and basic text actions
 - Pretrained handwritten OCR support through TrOCR, with lazy loading and local cache usage
+- Real-time correction after recognition, including spelling, dysgraphia-style error patterns,
+  semantic context heuristics, and an optional pretrained contextual language model
 - Tests covering capture, preprocessing, template recognition, TrOCR rendering, web payload parsing, and pipeline behavior
 
-The next major gaps are real handwriting accuracy benchmarking, sentence-level correction, word/line segmentation refinement, and Raspberry Pi performance validation.
+The next major gaps are real handwriting accuracy benchmarking, broader sentence-level
+grammar evaluation, word/line segmentation refinement, and Raspberry Pi performance validation.
 
 ## Repository Layout
 
@@ -91,6 +94,48 @@ that, the UI runs it from the local cache.
 
 For best compatibility with PyTorch, use Python 3.9-3.11 for the model
 environment.
+
+## Real-Time Correction
+
+Recognition responses now continue through the correction pipeline before the
+browser UI is updated. The API returns both `recognized_text` and
+`corrected_text`; the textarea shows the corrected text, while raw OCR stays in
+the debug panel.
+
+The default realtime path uses the contextual corrector with lightweight local
+checks enabled and Transformer reranking disabled:
+
+- deterministic spelling and dysgraphia-pattern checks
+- fuzzy candidate generation for swaps, omissions, insertions, doubling, and
+  visual confusions
+- semantic context heuristics for common real-word mistakes
+- optional pretrained masked-language reranking through
+  `distilbert/distilbert-base-uncased`
+
+Useful runtime flags:
+
+```bash
+AWP_DEVICE_PROFILE=laptop
+AWP_CORRECTION_MODE=contextual
+AWP_CONTEXTUAL_MODEL_ENABLED=0
+AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
+```
+
+Enable `AWP_CONTEXTUAL_MODEL_ENABLED=1` only after the model is installed and
+verified on the target laptop. Recognition should still work if correction
+model loading fails; the API falls back to raw recognized text.
+
+For Raspberry Pi migration, keep the same pipeline but disable the contextual
+Transformer by default:
+
+```bash
+AWP_DEVICE_PROFILE=raspberry_pi
+AWP_CONTEXTUAL_MODEL_ENABLED=0
+```
+
+The project tracks "nearly 100%" accuracy as an evaluation target. It should be
+reported with measured correction accuracy, false-positive rate, and latency on
+curated handwriting samples rather than treated as a guaranteed runtime claim.
 
 Fallback template mode is still available for debugging:
 

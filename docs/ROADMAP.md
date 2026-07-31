@@ -82,13 +82,13 @@
 
 ## Phase 5 - Spell Correction And Dysgraphia Error Patterns
 
-- Timeline: 4-7 days
+- Timeline: in progress, contextual pipeline added after 2026-07-31 sync
 - Complexity: medium
 - Dependencies: Phase 4
 - Deliverables:
-  - Dictionary and fuzzy matching correction
-  - Dysgraphia-specific confusion sets
-  - Reversal, swap, omission, phonetic, and doubling error tests
+  - Dictionary and fuzzy matching correction: initial implementation completed
+  - Dysgraphia-specific confusion sets: initial implementation completed
+  - Reversal, swap, omission, phonetic, and doubling error tests: initial coverage completed
 - Success criteria:
   - Common examples such as `teh -> the`, `fone -> phone`, and `writting -> writing` pass
   - Corrections include confidence and reason codes
@@ -96,13 +96,13 @@
 
 ## Phase 6 - Grammar And Semantic Correction
 
-- Timeline: 1-2 weeks
+- Timeline: in progress
 - Complexity: high
 - Dependencies: Phase 5
 - Deliverables:
   - Offline grammar fallback
   - Optional API-backed correction adapter
-  - Contextual word-choice checks
+  - Contextual word-choice checks: initial heuristics and optional masked-LM reranking completed
   - Capitalization and punctuation refinement
 - Success criteria:
   - Subject-verb, tense, article, and contextual examples pass
@@ -111,13 +111,13 @@
 
 ## Phase 7 - Real-Time Display
 
-- Timeline: 1 week
+- Timeline: in progress
 - Complexity: medium
 - Dependencies: Phases 2-6
 - Deliverables:
-  - Side-by-side raw and corrected text display
-  - Highlighted corrections
-  - Confidence badges
+  - Side-by-side raw and corrected text display: raw OCR debug plus corrected primary output completed
+  - Highlighted corrections: correction list completed
+  - Confidence badges: recognition and correction confidence completed
   - Manual review indicators
 - Success criteria:
   - Corrections update after word completion
