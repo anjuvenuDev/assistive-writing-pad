@@ -110,8 +110,6 @@ class TrOCRHandwritingRecognizer:
                 metadata={"recognizer": "trocr", "reason": "empty_strokes"},
             )
 
-        self._ensure_loaded()
-
         # Resolve effective mode.
         effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
         is_single_char = _looks_like_single_character_input([strokes])
@@ -149,6 +147,8 @@ class TrOCRHandwritingRecognizer:
                     "confusion_pairs": json.dumps(confusion_pairs),
                 }
             )
+
+        self._ensure_loaded()
 
         # --- Render ---
         raw_image = render_strokes_for_trocr(strokes)
@@ -219,8 +219,6 @@ class TrOCRHandwritingRecognizer:
                 metadata={"recognizer": "trocr", "reason": "empty_strokes"},
             )
 
-        self._ensure_loaded()
-
         # Resolve effective mode.
         effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
         is_single_char_input = _looks_like_single_character_input(stroke_groups)
@@ -256,6 +254,8 @@ class TrOCRHandwritingRecognizer:
                     }])
                 }
             )
+
+        self._ensure_loaded()
 
         # Import here to keep recognition module decoupled from preprocessing
         # at the class level while still using the new pipeline at runtime.
