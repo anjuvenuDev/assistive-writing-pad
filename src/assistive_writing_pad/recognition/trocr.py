@@ -7,7 +7,7 @@ model dependencies are installed.
 Environment variables
 ---------------------
 AWP_TROCR_MODEL
-    HuggingFace checkpoint name (default: microsoft/trocr-small-handwritten).
+    HuggingFace checkpoint name (default: microsoft/trocr-base-handwritten).
 AWP_TROCR_RENDER_SIZE
     Render canvas size in WxH format, e.g. "768x256" (default: 768x256).
     Increase for higher accuracy; decrease on memory-constrained devices.
@@ -19,8 +19,7 @@ AWP_WORD_SEGMENT
     detected word is recognised independently and results are joined with
     spaces.  Off by default (safer for tightly written text).
 AWP_OCR_MODE
-    Default recognition mode: "auto" (default), "character", or "word".
-    Can be overridden per-request via the API payload.
+    Accepted for backward compatibility; every web mode uses OCR.
 """
 
 from __future__ import annotations
@@ -39,18 +38,15 @@ from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
 logger = logging.getLogger(__name__)
 
-# Recognition mode type.
-# "auto"      -- use single-character path when strokes look like one char,
-#                word path otherwise.
-# "character" -- always use single-character path + confusion correction.
-# "word"      -- always use full-line TrOCR path, no confusion correction.
-RecognitionMode = Literal["auto", "character", "word"]
+# Recognition mode type. Values are accepted for backward compatibility with
+# the UI/API, but TrOCR is now used for every live recognition path.
+RecognitionMode = Literal["auto", "character", "word", "ocr"]
 
 _DEFAULT_OCR_MODE: RecognitionMode = os.environ.get(  # type: ignore[assignment]
     "AWP_OCR_MODE", "auto"
 ).strip() or "auto"
 
-DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-small-handwritten")
+DEFAULT_TROCR_MODEL = os.environ.get("AWP_TROCR_MODEL", "microsoft/trocr-base-handwritten")
 
 # Default render canvas: 768x256 gives TrOCR roughly 2x the horizontal
 # resolution compared to the previous 384x128, which significantly improves
@@ -60,6 +56,14 @@ _DEFAULT_RENDER_H = 256
 
 # Whether horizontal word segmentation is enabled (off by default).
 _WORD_SEGMENT_ENABLED: bool = os.environ.get("AWP_WORD_SEGMENT", "0").strip() == "1"
+
+
+def _normalize_requested_mode(mode: str) -> str:
+    if mode in {"auto", "character", "word", "ocr"}:
+        return mode
+    if _DEFAULT_OCR_MODE in {"character", "word", "ocr"}:
+        return _DEFAULT_OCR_MODE
+    return "ocr"
 
 
 def _parse_render_size() -> tuple:
@@ -100,7 +104,6 @@ class TrOCRHandwritingRecognizer:
         self._processor = None
         self._model = None
         self._torch = None
-        self._emnist_recognizer = None
 
     def recognize(self, strokes: Sequence[StrokePoint], mode: RecognitionMode = "auto") -> RecognitionResult:
         if not strokes:
@@ -110,43 +113,11 @@ class TrOCRHandwritingRecognizer:
                 metadata={"recognizer": "trocr", "reason": "empty_strokes"},
             )
 
-        # Resolve effective mode.
-        effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
-        is_single_char = _looks_like_single_character_input([strokes])
-        use_char_mode = effective_mode == "character" or (effective_mode == "auto" and is_single_char)
+        requested_mode = _normalize_requested_mode(mode)
         logger.info(
-            "recognize: mode=%s effective=%s is_single_char=%s",
-            mode, "character" if use_char_mode else "word", is_single_char,
+            "recognize: requested_mode=%s effective=ocr",
+            requested_mode,
         )
-
-        if use_char_mode:
-            if self._emnist_recognizer is None:
-                from assistive_writing_pad.recognition.emnist import EMNISTCharacterRecognizer
-                self._emnist_recognizer = EMNISTCharacterRecognizer()
-            res = self._emnist_recognizer.recognize(strokes)
-            # top5 carries up to 5 candidates (CNN + confusion-map siblings).
-            top5 = [(c.character, c.confidence) for c in res.character_confidences]
-            # Log confusion pairs: when rank-1 differs between raw CNN and merged output
-            # this is already logged inside emnist.py; surface it here too for the API.
-            confusion_pairs = [
-                f"{top5[0][0]}\u2194{c}" for c, _ in top5[1:4]
-            ] if len(top5) > 1 else []
-            logger.info(
-                "recognize [character]: result=%r conf=%.3f top5=%r confusion=%r",
-                res.text, res.confidence, top5[:3], confusion_pairs,
-            )
-            return RecognitionResult(
-                text=res.text,
-                confidence=res.confidence,
-                character_confidences=res.character_confidences,
-                metadata={
-                    "recognizer": "emnist",
-                    "model": res.metadata.get("model", ""),
-                    "mode": "character",
-                    "top3": json.dumps(top5),
-                    "confusion_pairs": json.dumps(confusion_pairs),
-                }
-            )
 
         self._ensure_loaded()
 
@@ -165,17 +136,13 @@ class TrOCRHandwritingRecognizer:
         save_debug_images(raw_image, cropped_image, processed_image)
 
         # --- OCR ---
-        # In character mode use a smaller token budget: a single character
-        # takes at most 2 tokens (char + EOS), so capping at 4 prevents the
-        # model from emitting long noisy sequences.
-        max_tokens = 4 if use_char_mode else self.max_new_tokens
         inputs = self._processor(images=image, return_tensors="pt")
         pixel_values = inputs.pixel_values
 
         with self._torch.no_grad():
             generated = self._model.generate(
                 pixel_values,
-                max_new_tokens=max_tokens,
+                max_new_tokens=self.max_new_tokens,
                 return_dict_in_generate=True,
                 output_scores=True,
             )
@@ -184,14 +151,9 @@ class TrOCRHandwritingRecognizer:
         confidence = _generation_confidence(generated, self._torch)
 
         text = _clean_ocr_text(raw_text)
-        if is_single_char:
-            text = _single_character_guess(text)
-            hinted = _shape_hint_for_single_character([strokes], text)
-            if hinted is not None:
-                text = hinted
         top3: List[Tuple[str, float]] = [(text, confidence)]
         logger.info(
-            "recognize [word]: result=%r confidence=%.3f raw=%r",
+            "recognize [ocr]: result=%r confidence=%.3f raw=%r",
             text.strip(), confidence, raw_text.strip(),
         )
 
@@ -202,7 +164,8 @@ class TrOCRHandwritingRecognizer:
                 "recognizer": "trocr",
                 "model": self.model_name,
                 "raw_text": raw_text.strip(),
-                "mode": "character" if use_char_mode else "word",
+                "mode": "ocr",
+                "requested_mode": requested_mode,
                 "top3": json.dumps(top3),
             },
         )
@@ -219,41 +182,11 @@ class TrOCRHandwritingRecognizer:
                 metadata={"recognizer": "trocr", "reason": "empty_strokes"},
             )
 
-        # Resolve effective mode.
-        effective_mode: RecognitionMode = mode if mode in ("auto", "character", "word") else _DEFAULT_OCR_MODE
-        is_single_char_input = _looks_like_single_character_input(stroke_groups)
-        use_char_mode = effective_mode == "character" or (effective_mode == "auto" and is_single_char_input)
+        requested_mode = _normalize_requested_mode(mode)
         logger.info(
-            "recognize_stroke_groups: mode=%s effective=%s is_single_char=%s",
-            mode, "character" if use_char_mode else "word", is_single_char_input,
+            "recognize_stroke_groups: requested_mode=%s effective=ocr",
+            requested_mode,
         )
-
-        if use_char_mode:
-            if self._emnist_recognizer is None:
-                from assistive_writing_pad.recognition.emnist import EMNISTCharacterRecognizer
-                self._emnist_recognizer = EMNISTCharacterRecognizer()
-            flattened = [point for stroke in stroke_groups for point in stroke]
-            res = self._emnist_recognizer.recognize(flattened)
-            top5 = [(c.character, c.confidence) for c in res.character_confidences]
-            return RecognitionResult(
-                text=res.text,
-                confidence=res.confidence,
-                character_confidences=res.character_confidences,
-                metadata={
-                    "recognizer": "emnist",
-                    "model": res.metadata.get("model", ""),
-                    "mode": "character",
-                    "top3": json.dumps(top5),
-                    "lines": "1",
-                    "line_results": json.dumps([{
-                        "line_index": 0,
-                        "text": res.text,
-                        "raw_text": res.text,
-                        "confidence": res.confidence,
-                        "stroke_groups": len(stroke_groups)
-                    }])
-                }
-            )
 
         self._ensure_loaded()
 
@@ -262,16 +195,9 @@ class TrOCRHandwritingRecognizer:
         from assistive_writing_pad.preprocessing.ocr_image_ops import (
             segment_words_horizontally,
         )
-        from assistive_writing_pad.recognition.confusion import (
-            apply_confusion_correction,
-            restrict_to_charset,
-        )
         from assistive_writing_pad.recognition.debug_saver import save_debug_images
 
-        if use_char_mode or is_single_char_input:
-            lines = [list(stroke_groups)]
-        else:
-            lines = segment_strokes_into_lines(stroke_groups)
+        lines = segment_strokes_into_lines(stroke_groups)
 
         logger.info(
             "recognize_stroke_groups: %d stroke group(s) -> %d line(s)",
@@ -281,7 +207,6 @@ class TrOCRHandwritingRecognizer:
         line_results = []
         line_texts = []
         confidences = []
-        # top3 for the whole result (only meaningful in character mode)
         result_top3: List[Tuple[str, float]] = []
 
         for line_index, line_groups in enumerate(lines):
@@ -301,11 +226,8 @@ class TrOCRHandwritingRecognizer:
                 label=f"line{line_index}",
             )
 
-            # In character mode use a small token budget.
-            max_tokens = 4 if use_char_mode else self.max_new_tokens
-
-            # --- Optional word segmentation (word mode only) ---
-            if _WORD_SEGMENT_ENABLED and not use_char_mode:
+            # --- Optional word segmentation ---
+            if _WORD_SEGMENT_ENABLED:
                 word_regions = segment_words_horizontally(proc_image)
                 logger.info(
                     "line %d: word segmentation -> %d region(s)",
@@ -322,7 +244,7 @@ class TrOCRHandwritingRecognizer:
                 with self._torch.no_grad():
                     generated = self._model.generate(
                         inputs.pixel_values,
-                        max_new_tokens=max_tokens,
+                        max_new_tokens=self.max_new_tokens,
                         return_dict_in_generate=True,
                         output_scores=True,
                     )
@@ -331,23 +253,8 @@ class TrOCRHandwritingRecognizer:
                 )[0]
                 word_conf = _generation_confidence(generated, self._torch)
 
-                if use_char_mode:
-                    # Character mode: restrict charset and apply confusion correction.
-                    clean_raw = restrict_to_charset(raw_text, charset="alphanum")
-                    if not clean_raw:
-                        clean_raw = _single_character_guess(_clean_ocr_text(raw_text))
-                        hinted = _shape_hint_for_single_character(line_groups, clean_raw)
-                        if hinted is not None:
-                            clean_raw = hinted
-                    word_text, top3 = apply_confusion_correction(clean_raw, word_conf, mode="character")
-                    result_top3 = top3  # save for final result
-                    logger.info(
-                        "line %d [char]: result=%r conf=%.3f top3=%r",
-                        line_index, word_text, word_conf, top3,
-                    )
-                else:
-                    word_text = _clean_ocr_text(raw_text)
-                    word_text = word_text.strip()
+                word_text = _clean_ocr_text(raw_text)
+                word_text = word_text.strip()
 
                 word_texts.append(word_text)
                 word_confidences.append(word_conf)
@@ -355,13 +262,6 @@ class TrOCRHandwritingRecognizer:
             # Merge word results back into a line.
             line_raw_text = " ".join(w for w in word_texts if w)
             text = line_raw_text
-
-            # Single-character correction path for auto-mode (non-char-mode).
-            if not use_char_mode and _looks_like_single_character_input(line_groups):
-                text = _single_character_guess(text)
-                hinted = _shape_hint_for_single_character(line_groups, text)
-                if hinted is not None:
-                    text = hinted
 
             confidence = float(np.mean(word_confidences)) if word_confidences else 0.0
             logger.info(
@@ -381,16 +281,19 @@ class TrOCRHandwritingRecognizer:
                 }
             )
 
+        final_text = "\n".join(text for text in line_texts if text)
         final_confidence = float(np.mean(confidences)) if confidences else 0.0
+        result_top3 = [(final_text, final_confidence)] if final_text else []
         return RecognitionResult(
-            text="\n".join(text for text in line_texts if text),
+            text=final_text,
             confidence=final_confidence,
             metadata={
                 "recognizer": "trocr",
                 "model": self.model_name,
                 "lines": str(len(lines)),
                 "line_results": json.dumps(line_results),
-                "mode": "character" if use_char_mode else "word",
+                "mode": "ocr",
+                "requested_mode": requested_mode,
                 "top3": json.dumps(result_top3),
             },
         )

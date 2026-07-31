@@ -1,20 +1,12 @@
 from assistive_writing_pad.contracts import StrokePoint
-from assistive_writing_pad.contracts import RecognitionResult
 from assistive_writing_pad.recognition.trocr import (
+    DEFAULT_TROCR_MODEL,
     TrOCRHandwritingRecognizer,
     _DEFAULT_RENDER_H,
     _DEFAULT_RENDER_W,
+    _normalize_requested_mode,
     render_strokes_for_trocr,
 )
-
-
-class StubEMNISTRecognizer:
-    def recognize(self, strokes):
-        return RecognitionResult(
-            text="a",
-            confidence=0.91,
-            metadata={"recognizer": "emnist", "model": "stub"},
-        )
 
 
 def test_trocr_renderer_returns_rgb_numpy_line_image() -> None:
@@ -39,38 +31,19 @@ def test_trocr_renderer_handles_empty_strokes() -> None:
     assert image.min() == 255
 
 
-def test_character_mode_does_not_load_trocr(monkeypatch) -> None:
+def test_default_trocr_model_prioritizes_base_handwriting_ocr() -> None:
     recognizer = TrOCRHandwritingRecognizer()
-    monkeypatch.setattr(
-        "assistive_writing_pad.recognition.emnist.EMNISTCharacterRecognizer",
-        StubEMNISTRecognizer,
-    )
 
-    def fail_if_loaded() -> None:
-        raise AssertionError("TrOCR should not load for character mode")
-
-    monkeypatch.setattr(recognizer, "_ensure_loaded", fail_if_loaded)
-    result = recognizer.recognize([StrokePoint(x=10, y=20, timestamp_ms=0)], mode="character")
-
-    assert result.text == "a"
-    assert result.metadata["recognizer"] == "emnist"
+    assert DEFAULT_TROCR_MODEL == "microsoft/trocr-base-handwritten"
+    assert recognizer.model_name == "microsoft/trocr-base-handwritten"
 
 
-def test_character_stroke_groups_do_not_load_trocr(monkeypatch) -> None:
-    recognizer = TrOCRHandwritingRecognizer()
-    monkeypatch.setattr(
-        "assistive_writing_pad.recognition.emnist.EMNISTCharacterRecognizer",
-        StubEMNISTRecognizer,
-    )
+def test_legacy_modes_are_accepted_as_ocr_requests() -> None:
+    assert _normalize_requested_mode("auto") == "auto"
+    assert _normalize_requested_mode("character") == "character"
+    assert _normalize_requested_mode("word") == "word"
+    assert _normalize_requested_mode("ocr") == "ocr"
 
-    def fail_if_loaded() -> None:
-        raise AssertionError("TrOCR should not load for character mode")
 
-    monkeypatch.setattr(recognizer, "_ensure_loaded", fail_if_loaded)
-    result = recognizer.recognize_stroke_groups(
-        [[StrokePoint(x=10, y=20, timestamp_ms=0)]],
-        mode="character",
-    )
-
-    assert result.text == "a"
-    assert result.metadata["recognizer"] == "emnist"
+def test_unknown_mode_falls_back_to_ocr() -> None:
+    assert _normalize_requested_mode("glyph") == "ocr"

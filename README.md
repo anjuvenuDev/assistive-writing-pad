@@ -131,6 +131,7 @@ Transformer by default:
 
 ```bash
 AWP_DEVICE_PROFILE=raspberry_pi
+AWP_TROCR_MODEL=microsoft/trocr-small-handwritten
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_PRELOAD_OCR_MODEL=0
 ```

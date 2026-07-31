@@ -69,7 +69,7 @@
   - Clean handwriting interface: completed
   - Stroke capture reflected on screen: completed
   - Recognition after stroke release/pause: completed
-  - Pretrained handwritten OCR model: completed with `microsoft/trocr-small-handwritten`
+  - Pretrained handwritten OCR model: completed with `microsoft/trocr-base-handwritten`
   - Fallback sample learning: completed
   - Accuracy and latency benchmark on real strokes: pending
   - Character or word confidence scores: initial confidence completed

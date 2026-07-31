@@ -50,11 +50,26 @@ def test_recognition_service_returns_realtime_correction_metadata() -> None:
     )
 
     result = service.recognize_payload(
-        {"strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]], "mode": "word"}
+        {"strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]]}
     )
 
     assert result["recognized_text"] == "teh cat sat on a chaier"
     assert result["corrected_text"] == "the cat sat on a chair"
     assert result["text"] == "the cat sat on a chair"
     assert result["needs_review"] is False
+    assert result["mode"] == "ocr"
     assert result["corrections"][0]["original"] == "teh"
+
+
+def test_recognition_service_accepts_legacy_mode_values() -> None:
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=ContextualCorrector(model_enabled=False),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    result = service.recognize_payload(
+        {"strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]], "mode": "word"}
+    )
+
+    assert result["mode"] == "word"

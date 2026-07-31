@@ -8,7 +8,9 @@ notes in `docs/SKILL_LOG.md` when it is added.
 
 Current model-backed paths:
 
-- Handwriting OCR: `microsoft/trocr-small-handwritten`
+- Handwriting OCR, laptop default: `microsoft/trocr-base-handwritten`
+- Handwriting OCR, Raspberry Pi or lower-memory override:
+  `microsoft/trocr-small-handwritten`
 - Optional contextual correction reranker:
   `distilbert/distilbert-base-uncased`
 

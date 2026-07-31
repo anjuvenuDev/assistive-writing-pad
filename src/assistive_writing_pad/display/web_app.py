@@ -227,38 +227,6 @@ HTML = """<!doctype html>
       white-space: pre-wrap;
       text-align: left;
     }
-    /* Mode selector */
-    .mode-selector {
-      display: flex;
-      gap: 6px;
-      margin-top: 10px;
-      align-items: center;
-    }
-    .mode-label {
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 600;
-      margin-right: 4px;
-      white-space: nowrap;
-    }
-    .mode-btn {
-      border: 1.5px solid var(--line);
-      background: #fff;
-      color: var(--muted);
-      border-radius: 20px;
-      padding: 4px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
-      min-height: 30px;
-    }
-    .mode-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .mode-btn.active {
-      background: var(--accent);
-      color: #fff;
-      border-color: var(--accent);
-    }
     /* Top-3 predictions panel */
     #top3-panel {
       margin-top: 12px;
@@ -418,13 +386,6 @@ HTML = """<!doctype html>
         </div>
         <div id="pointer-log">Canvas event logs will appear here...</div>
       </div>
-      <!-- Mode selector -->
-      <div class="mode-selector">
-        <span class="mode-label">Mode:</span>
-        <button class="mode-btn active" id="mode-auto"   data-mode="auto">Auto</button>
-        <button class="mode-btn"        id="mode-char"   data-mode="character">Character</button>
-        <button class="mode-btn"        id="mode-word"   data-mode="word">Word</button>
-      </div>
       <div class="toolbar">
         <button class="primary" id="recognize">Recognize Now</button>
         <button id="clearInk">Clear Ink</button>
@@ -448,7 +409,7 @@ HTML = """<!doctype html>
           <div class="correction-empty">No corrections yet.</div>
         </div>
       </div>
-      <!-- Top predictions panel (up to 5, sourced from EMNIST in character mode) -->
+      <!-- OCR candidate panel -->
       <div id="top3-panel">
         <div class="top3-title">Top Predictions</div>
         <div class="top3-list" id="top3-list">
@@ -489,7 +450,7 @@ HTML = """<!doctype html>
         <div id="raw-text">No recognition yet.</div>
       </details>
       <div class="setup">
-        Pretrained OCR uses <code>microsoft/trocr-small-handwritten</code> with line-aware
+        Pretrained OCR uses <code>microsoft/trocr-base-handwritten</code> with line-aware
         segmentation. If recognition reports missing dependencies, create a Python 3.10
         environment and run <code>scripts/setup_model_env.sh</code>.
       </div>
@@ -522,7 +483,7 @@ HTML = """<!doctype html>
     let last           = null;  // last canvas-space point {x, y, ...}
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
-    let currentMode    = "auto"; // "auto" | "character" | "word"
+    let currentMode    = "ocr";
 
     /* -----------------------------------------------------------------------
      * Diagnostics logger
@@ -804,7 +765,7 @@ HTML = """<!doctype html>
         rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
         pdStrokes.textContent = strokes.length;
         renderCorrections(result.corrections || []);
-        // Render top predictions (up to 5 in character mode via EMNIST).
+        // Render OCR candidates when the recognizer returns them.
         renderTop3(result.top3 || []);
       } catch (err) {
         statusEl.textContent = err.message;
@@ -869,9 +830,8 @@ HTML = """<!doctype html>
 
     /**
      * Render up to 5 candidate predictions.
-     * In character mode (EMNIST), top3 is an array of up to 5 [char, confidence] pairs.
-     * In word mode (TrOCR), top3 has 1 entry.
-     * Clicking any prediction card inserts that character into the recognized textarea.
+     * OCR returns optional candidate text/confidence pairs.
+     * Clicking any prediction card inserts that candidate into the recognized textarea.
      */
     function renderTop3(top3) {
       const MAX_SLOTS = 5;
@@ -901,15 +861,6 @@ HTML = """<!doctype html>
           item.onclick = null;
         }
       }
-    }
-
-    /** Wire the mode selector buttons. */
-    function setMode(mode) {
-      currentMode = mode;
-      document.querySelectorAll(".mode-btn").forEach(btn => {
-        btn.classList.toggle("active", btn.dataset.mode === mode);
-      });
-      console.log("[AWP] mode changed to:", mode);
     }
 
     function clearInk() {
@@ -961,11 +912,6 @@ HTML = """<!doctype html>
       recognizedEl.value = "";
     });
 
-    // Mode selector buttons.
-    document.querySelectorAll(".mode-btn").forEach(btn => {
-      btn.addEventListener("click", () => setMode(btn.dataset.mode));
-    });
-
     // Initial canvas setup.
     resizeCanvas();
     renderCorrections([]);
@@ -1009,10 +955,10 @@ class RecognitionService:
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)
-        # Accept mode from the request payload; default to "auto".
-        mode = payload.get("mode", "auto")
-        if mode not in ("auto", "character", "word"):
-            mode = "auto"
+        # Accept legacy mode values, but recognition always uses OCR.
+        mode = payload.get("mode", "ocr")
+        if mode not in ("auto", "character", "word", "ocr"):
+            mode = "ocr"
         result = self.recognizer.recognize_stroke_groups(stroke_groups, mode=mode)
         pipeline_result = self.pipeline.process_recognition(result)
         # Parse top3 from metadata (list of [char, confidence] pairs).
