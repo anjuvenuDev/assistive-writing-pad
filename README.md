@@ -119,6 +119,7 @@ AWP_DEVICE_PROFILE=laptop
 AWP_CORRECTION_MODE=contextual
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
+AWP_PRELOAD_OCR_MODEL=1
 ```
 
 Enable `AWP_CONTEXTUAL_MODEL_ENABLED=1` only after the model is installed and
@@ -131,6 +132,7 @@ Transformer by default:
 ```bash
 AWP_DEVICE_PROFILE=raspberry_pi
 AWP_CONTEXTUAL_MODEL_ENABLED=0
+AWP_PRELOAD_OCR_MODEL=0
 ```
 
 The project tracks "nearly 100%" accuracy as an evaluation target. It should be

@@ -21,3 +21,10 @@ def test_runtime_settings_disable_contextual_model_by_default(monkeypatch) -> No
     monkeypatch.delenv("AWP_CONTEXTUAL_MODEL_ENABLED", raising=False)
 
     assert RuntimeSettings.from_env().contextual_model_enabled is False
+
+
+def test_runtime_settings_disable_ocr_preload_on_raspberry_pi(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_DEVICE_PROFILE", "raspberry_pi")
+    monkeypatch.delenv("AWP_PRELOAD_OCR_MODEL", raising=False)
+
+    assert RuntimeSettings.from_env().preload_ocr_model is False

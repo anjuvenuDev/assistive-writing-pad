@@ -21,6 +21,7 @@ class RuntimeSettings:
     correction_mode: str = "contextual"
     contextual_model_enabled: bool = False
     contextual_model_name: str = "distilbert/distilbert-base-uncased"
+    preload_ocr_model: bool = True
     max_correction_candidates: int = 8
     correction_confidence_threshold: float = 0.70
 
@@ -28,6 +29,7 @@ class RuntimeSettings:
     def from_env(cls) -> "RuntimeSettings":
         device_profile = os.environ.get("AWP_DEVICE_PROFILE", "laptop").strip() or "laptop"
         correction_mode = os.environ.get("AWP_CORRECTION_MODE", "contextual").strip() or "contextual"
+        default_preload = "0" if device_profile == "raspberry_pi" else "1"
         settings = cls(
             confidence_threshold=_float_env("AWP_CONFIDENCE_THRESHOLD", cls.confidence_threshold),
             max_sentence_latency_ms=_int_env(
@@ -46,6 +48,7 @@ class RuntimeSettings:
                 "AWP_CONTEXTUAL_MODEL", cls.contextual_model_name
             ).strip()
             or cls.contextual_model_name,
+            preload_ocr_model=_bool_env("AWP_PRELOAD_OCR_MODEL", default_preload == "1"),
             max_correction_candidates=_int_env(
                 "AWP_MAX_CORRECTION_CANDIDATES", cls.max_correction_candidates
             ),

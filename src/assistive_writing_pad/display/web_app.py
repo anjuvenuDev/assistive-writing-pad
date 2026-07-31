@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
@@ -13,6 +15,8 @@ from assistive_writing_pad.contracts import CorrectionResult, PipelineResult, St
 from assistive_writing_pad.correction.contextual import ContextualCorrector
 from assistive_writing_pad.pipeline import WritingPipeline
 from assistive_writing_pad.recognition.trocr import RecognitionUnavailable, TrOCRHandwritingRecognizer
+
+logger = logging.getLogger(__name__)
 
 
 HTML = """<!doctype html>
@@ -987,6 +991,22 @@ class RecognitionService:
             settings=self.settings,
         )
 
+    def warm_up_async(self) -> None:
+        if not self.settings.preload_ocr_model:
+            return
+        thread = threading.Thread(target=self._warm_up_ocr_model, daemon=True)
+        thread.start()
+
+    def _warm_up_ocr_model(self) -> None:
+        ensure_loaded = getattr(self.recognizer, "_ensure_loaded", None)
+        if not callable(ensure_loaded):
+            return
+        try:
+            ensure_loaded()
+            logger.info("OCR model warmed up")
+        except Exception as exc:
+            logger.warning("OCR model warm-up failed; first recognition may retry: %s", exc)
+
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)
         # Accept mode from the request payload; default to "auto".
@@ -1114,6 +1134,7 @@ def make_handler(service: RecognitionService):
 
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     service = RecognitionService()
+    service.warm_up_async()
     server = ThreadingHTTPServer((host, port), make_handler(service))
     print(f"Assistive Writing Pad running at http://{host}:{port}")
     print("Press Ctrl+C to stop.")
