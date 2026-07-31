@@ -48,3 +48,19 @@ def test_contextual_corrector_does_not_fuzzy_correct_short_fragments() -> None:
 
     assert result.corrected_text == "o"
     assert result.corrections == ()
+
+
+def test_contextual_corrector_preserves_valid_progressive_phrase_words() -> None:
+    result = make_corrector().correct("doing well")
+
+    assert result.corrected_text == "doing well"
+    assert result.corrections == ()
+
+
+def test_contextual_corrector_repairs_are_misread_as_the_before_ing_word() -> None:
+    result = make_corrector().correct("Hi hope you\nthe doing well")
+
+    assert result.corrected_text == "Hi hope you\nare doing well"
+    assert [(item.original, item.corrected, item.reason) for item in result.corrections] == [
+        ("the", "are", "semantic_context")
+    ]

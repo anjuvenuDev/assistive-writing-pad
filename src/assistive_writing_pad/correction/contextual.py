@@ -16,8 +16,10 @@ logger = logging.getLogger(__name__)
 
 try:  # rapidfuzz is a normal project dependency, but keep import failure non-fatal.
     from rapidfuzz import fuzz, process
+    from rapidfuzz.distance import Levenshtein
 except ImportError:  # pragma: no cover - only used in incomplete environments.
     fuzz = None
+    Levenshtein = None
     process = None
 
 
@@ -67,6 +69,7 @@ COMMON_WORDS: Set[str] = {
     "do",
     "does",
     "dog",
+    "doing",
     "down",
     "eat",
     "for",
@@ -86,9 +89,11 @@ COMMON_WORDS: Set[str] = {
     "help",
     "her",
     "here",
+    "hi",
     "him",
     "his",
     "home",
+    "hope",
     "house",
     "i",
     "in",
@@ -164,6 +169,7 @@ COMMON_WORDS: Set[str] = {
     "we",
     "went",
     "were",
+    "well",
     "what",
     "when",
     "where",
@@ -197,6 +203,7 @@ SEMANTIC_CONFUSIONS: Tuple[Tuple[str, ...], ...] = (
     ("hear", "here"),
     ("no", "know"),
     ("was", "saw"),
+    ("are", "the"),
 )
 
 
@@ -325,13 +332,13 @@ class ContextualCorrector:
                 if candidate == word:
                     continue
                 score = raw_score / 100.0
-                if score >= 0.78:
+                if score >= 0.84 and is_safe_fuzzy_candidate(word, candidate):
                     yield candidate, score, spelling_reason(word, candidate)
             return
 
         for candidate in self.vocabulary:  # pragma: no cover - rapidfuzz fallback.
             score = simple_similarity(word, candidate)
-            if score >= 0.78:
+            if score >= 0.84 and is_safe_fuzzy_candidate(word, candidate):
                 yield candidate, score, spelling_reason(word, candidate)
 
     def _rank_candidates(
@@ -462,6 +469,21 @@ def heuristic_context_scores(
         if next_word in {"is", "are", "was", "were"} or previous_word in {"over", "in"}:
             scores["there"] = 0.92
 
+    if {"are", "the"} & candidates:
+        if current == "the" and previous_word in {"you", "we", "they"} and looks_like_gerund(next_word):
+            scores["are"] = 0.96
+        if current == "are" and next_word in {
+            "book",
+            "chair",
+            "class",
+            "home",
+            "house",
+            "paper",
+            "pen",
+            "teacher",
+        }:
+            scores["the"] = 0.90
+
     if {"hear", "here"} & candidates:
         if previous_word in {"can", "could", "will"}:
             scores["hear"] = 0.92
@@ -496,6 +518,10 @@ def nearest_word(tokens: Sequence[str], start_index: int, step: int) -> Optional
             return None
         index += step
     return None
+
+
+def looks_like_gerund(word: Optional[str]) -> bool:
+    return word is not None and (word.endswith("ing") or word in {"doing", "going", "writing"})
 
 
 def tokenize_preserving_layout(text: str) -> List[str]:
@@ -540,6 +566,16 @@ def spelling_reason(original: str, candidate: str) -> str:
     if visual_confusion_distance(original, candidate) == 1:
         return "visual_or_reversal_error"
     return "fuzzy_spelling"
+
+
+def is_safe_fuzzy_candidate(original: str, candidate: str) -> bool:
+    if len(candidate) < len(original) - 1:
+        return False
+    if abs(len(original) - len(candidate)) > 2:
+        return False
+    if Levenshtein is not None:
+        return Levenshtein.distance(original, candidate) <= 2
+    return simple_similarity(original, candidate) >= 0.84
 
 
 def has_adjacent_swap(original: str, candidate: str) -> bool:
