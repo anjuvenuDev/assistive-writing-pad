@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from assistive_writing_pad.contracts import StrokePoint
 from assistive_writing_pad.recognition.emnist import (

@@ -10,12 +10,20 @@ DEFAULT_REPLACEMENTS = {
     "teh": ("the", "letter_swap"),
     "chaier": ("chair", "phonetic_or_insertion_error"),
     "fone": ("phone", "phonetic_error"),
+    "blal": ("ball", "dysgraphia_transposition"),
+    "taht": ("that", "letter_swap"),
+    "bll": ("ball", "omission"),
+    "bal": ("ball", "omission"),
+    "blak": ("black", "omission"),
+    "quik": ("quick", "omission"),
+    "hav": ("have", "omission"),
     "sed": ("said", "phonetic_error"),
     "rite": ("right", "phonetic_error"),
     "becaus": ("because", "omission"),
     "recieve": ("receive", "letter_order"),
     "writting": ("writing", "doubling_error"),
     "occured": ("occurred", "doubling_error"),
+    "jumlbed": ("jumbled", "letter_swap"),
 }
 
 

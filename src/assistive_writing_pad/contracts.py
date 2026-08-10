@@ -41,6 +41,17 @@ class Correction:
     corrected: str
     confidence: float
     reason: str
+    alternatives: Tuple["CorrectionAlternative", ...] = ()
+    edit_distance: int = 0
+    automatic: bool = True
+    status: str = "automatic"
+
+
+@dataclass(frozen=True)
+class CorrectionAlternative:
+    text: str
+    confidence: float
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,6 +60,9 @@ class CorrectionResult:
     corrected_text: str
     corrections: Tuple[Correction, ...] = ()
     confidence: float = 1.0
+    method: str = "none"
+    alternatives: Tuple[CorrectionAlternative, ...] = ()
+    status: str = "preserved"
 
     @property
     def changed(self) -> bool:

@@ -173,7 +173,7 @@ HTML = """<!doctype html>
     button.primary:hover { background: var(--accent-dark); }
     #recognized {
       width: 100%;
-      min-height: 280px;
+      min-height: 180px;
       resize: vertical;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -182,6 +182,79 @@ HTML = """<!doctype html>
       line-height: 1.35;
       color: var(--ink);
       background: #fbfcfd;
+    }
+    #recognized-raw {
+      width: 100%;
+      min-height: 56px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 20px;
+      line-height: 1.35;
+      color: #334155;
+      background: #f8fafc;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .output-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin: 10px 0 6px;
+    }
+    #suggestion-panel {
+      margin-top: 12px;
+      border: 1px solid #f59e0b;
+      background: #fffbeb;
+      border-radius: 8px;
+      padding: 10px;
+      display: none;
+    }
+    .suggestion-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #92400e;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .suggestion-main {
+      margin-top: 6px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .suggestion-meta {
+      margin-top: 4px;
+      color: #6b7280;
+      font-size: 13px;
+    }
+    .suggestion-actions {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .suggestion-actions button {
+      min-height: 34px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    #suggestion-alternatives {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .suggestion-alt {
+      border: 1px solid #fcd34d;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #92400e;
+      background: #fff7d6;
     }
     .setup {
       margin-top: 14px;
@@ -396,10 +469,24 @@ HTML = """<!doctype html>
     </section>
     <section>
       <div class="section-title">
-        <h2>Recognized Text</h2>
+        <h2>Recognition and Correction</h2>
         <span id="confidence">&mdash;</span>
       </div>
+      <div class="output-label">Recognized Handwriting</div>
+      <div id="recognized-raw">No recognition yet.</div>
+      <div class="output-label">Corrected Text</div>
       <textarea id="recognized" spellcheck="false"></textarea>
+      <div id="suggestion-panel">
+        <div class="suggestion-title">Suggestion</div>
+        <div class="suggestion-main" id="suggestion-text">&mdash;</div>
+        <div class="suggestion-meta" id="suggestion-confidence">Confidence: &mdash;</div>
+        <div id="suggestion-alternatives"></div>
+        <div class="suggestion-actions">
+          <button id="acceptSuggestion">Accept Correction</button>
+          <button id="rejectSuggestion">Reject Correction</button>
+          <button id="keepOriginal">Keep Original</button>
+        </div>
+      </div>
       <div id="correction-panel">
         <div class="correction-header">
           <span>Corrections</span>
@@ -464,10 +551,18 @@ HTML = """<!doctype html>
     const ctx          = canvas.getContext("2d");
     const statusEl     = document.getElementById("status");
     const confidenceEl = document.getElementById("confidence");
+    const recognizedRawEl = document.getElementById("recognized-raw");
     const recognizedEl = document.getElementById("recognized");
     const rawTextEl    = document.getElementById("raw-text");
     const correctionConfidenceEl = document.getElementById("correction-confidence");
     const correctionListEl = document.getElementById("correction-list");
+    const suggestionPanelEl = document.getElementById("suggestion-panel");
+    const suggestionTextEl = document.getElementById("suggestion-text");
+    const suggestionConfidenceEl = document.getElementById("suggestion-confidence");
+    const suggestionAlternativesEl = document.getElementById("suggestion-alternatives");
+    const acceptSuggestionEl = document.getElementById("acceptSuggestion");
+    const rejectSuggestionEl = document.getElementById("rejectSuggestion");
+    const keepOriginalEl = document.getElementById("keepOriginal");
     const pdType       = document.getElementById("pd-type");
     const pdX          = document.getElementById("pd-x");
     const pdY          = document.getElementById("pd-y");
@@ -484,6 +579,7 @@ HTML = """<!doctype html>
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
     let currentMode    = "ocr";
+    let lastRecognitionResult = null;
 
     /* -----------------------------------------------------------------------
      * Diagnostics logger
@@ -745,6 +841,8 @@ HTML = """<!doctype html>
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
+        lastRecognitionResult = result;
+        recognizedRawEl.textContent = result.recognized_text || result.text || "";
         recognizedEl.value = result.corrected_text || result.text || "";
         updateConfidenceBadge(
           Number(result.confidence || 0),
@@ -765,6 +863,7 @@ HTML = """<!doctype html>
         rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
         pdStrokes.textContent = strokes.length;
         renderCorrections(result.corrections || []);
+        renderSuggestion(result);
         // Render OCR candidates when the recognizer returns them.
         renderTop3(result.top3 || []);
       } catch (err) {
@@ -828,6 +927,59 @@ HTML = """<!doctype html>
       });
     }
 
+    function renderSuggestion(result) {
+      if (!result || result.correction_status !== "suggestion" || !result.suggestion_text) {
+        suggestionPanelEl.style.display = "none";
+        suggestionTextEl.textContent = "\u2014";
+        suggestionConfidenceEl.textContent = "Confidence: \u2014";
+        suggestionAlternativesEl.innerHTML = "";
+        return;
+      }
+
+      suggestionPanelEl.style.display = "block";
+      suggestionTextEl.textContent = result.suggestion_text;
+      const pct = Math.round(Number(result.correction_confidence || 0) * 100);
+      suggestionConfidenceEl.textContent = "Confidence: " + pct + "%";
+
+      suggestionAlternativesEl.innerHTML = "";
+      const alternatives = Array.isArray(result.alternatives) ? result.alternatives.slice(0, 3) : [];
+      alternatives.forEach((item) => {
+        const chip = document.createElement("span");
+        chip.className = "suggestion-alt";
+        const altPct = Math.round(Number(item.confidence || 0) * 100);
+        chip.textContent = (item.text || "") + " (" + altPct + "%)";
+        suggestionAlternativesEl.appendChild(chip);
+      });
+    }
+
+    async function sendCorrectionFeedback(decision) {
+      if (!lastRecognitionResult) {
+        return;
+      }
+
+      const original = String(lastRecognitionResult.recognized_text || "");
+      const selected = decision === "accept"
+        ? String(lastRecognitionResult.suggestion_text || "")
+        : original;
+
+      if (decision === "accept") {
+        recognizedEl.value = selected;
+      } else {
+        recognizedEl.value = original;
+      }
+
+      suggestionPanelEl.style.display = "none";
+      try {
+        await fetch("/api/correction-feedback", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({decision, original, selected}),
+        });
+      } catch (_) {
+        // Feedback is best-effort and should never block writing.
+      }
+    }
+
     /**
      * Render up to 5 candidate predictions.
      * OCR returns optional candidate text/confidence pairs.
@@ -866,6 +1018,7 @@ HTML = """<!doctype html>
     function clearInk() {
       strokes = [];
       currentStroke = [];
+      lastRecognitionResult = null;
 
       // Clear at device-pixel scale (identity transform), then re-apply DPR.
       const ratio = window.devicePixelRatio || 1;
@@ -878,10 +1031,12 @@ HTML = """<!doctype html>
       confidenceEl.textContent = "\u2014";
       confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
       correctionConfidenceEl.textContent = "\u2014";
+      recognizedRawEl.textContent = "No recognition yet.";
       rawTextEl.textContent = "No recognition yet.";
       statusEl.textContent = "Ink cleared";
       pdStrokes.textContent = "0";
       renderCorrections([]);
+      renderSuggestion(null);
       // Clear top-3 panel.
       renderTop3([]);
     }
@@ -911,10 +1066,14 @@ HTML = """<!doctype html>
     document.getElementById("clearText").addEventListener("click", () => {
       recognizedEl.value = "";
     });
+    acceptSuggestionEl.addEventListener("click", () => sendCorrectionFeedback("accept"));
+    rejectSuggestionEl.addEventListener("click", () => sendCorrectionFeedback("reject"));
+    keepOriginalEl.addEventListener("click", () => sendCorrectionFeedback("keep_original"));
 
     // Initial canvas setup.
     resizeCanvas();
     renderCorrections([]);
+    renderSuggestion(null);
     renderTop3([]);  // initialise top-3 panel in hidden state
   </script>
 </body>
@@ -968,12 +1127,26 @@ class RecognitionService:
         except (json.JSONDecodeError, TypeError):
             top3 = []
         correction = pipeline_result.correction
+        suggestion_text = ""
+        if correction.status == "suggestion" and correction.corrections:
+            suggestion_text = correction.corrections[0].corrected
         return {
             "text": correction.corrected_text,
             "recognized_text": result.text,
             "corrected_text": correction.corrected_text,
+            "suggestion_text": suggestion_text,
             "confidence": result.confidence,
             "correction_confidence": correction.confidence,
+            "correction_status": correction.status,
+            "correction_method": correction.method,
+            "alternatives": [
+                {
+                    "text": alt.text,
+                    "confidence": alt.confidence,
+                    "reason": alt.reason,
+                }
+                for alt in correction.alternatives
+            ],
             "corrections": corrections_payload(correction),
             "needs_review": pipeline_result.needs_review,
             "review_reason": pipeline_result.review_reason,
@@ -983,6 +1156,18 @@ class RecognitionService:
             "mode": result.metadata.get("mode", mode),
         }
 
+    def record_correction_feedback(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        decision = str(payload.get("decision", "")).strip().lower()
+        original = str(payload.get("original", "")).strip()
+        selected = str(payload.get("selected", "")).strip()
+        if decision not in {"accept", "reject", "keep_original"}:
+            raise ValueError("decision must be accept, reject, or keep_original")
+        if decision == "accept" and original and selected:
+            recorder = getattr(self.pipeline.corrector, "record_feedback", None)
+            if callable(recorder):
+                recorder(original, selected)
+        return {"ok": True, "decision": decision}
+
 
 def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
     return [
@@ -991,6 +1176,17 @@ def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
             "corrected": correction.corrected,
             "confidence": correction.confidence,
             "reason": correction.reason,
+            "edit_distance": correction.edit_distance,
+            "automatic": correction.automatic,
+            "status": correction.status,
+            "alternatives": [
+                {
+                    "text": alt.text,
+                    "confidence": alt.confidence,
+                    "reason": alt.reason,
+                }
+                for alt in correction.alternatives
+            ],
         }
         for correction in result.corrections
     ]
@@ -999,6 +1195,8 @@ def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
 def status_message(result: PipelineResult) -> str:
     if result.needs_review:
         return "Recognized and corrected handwriting; review recommended."
+    if result.correction.status == "suggestion":
+        return "Recognized handwriting with correction suggestions."
     if result.correction.changed:
         return "Recognized and corrected handwriting."
     return "Recognized handwriting."
@@ -1045,6 +1243,17 @@ def make_handler(service: RecognitionService):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
         def do_POST(self) -> None:
+            if self.path == "/api/correction-feedback":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                    result = service.record_correction_feedback(payload)
+                except Exception as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    return
+                self._send_json(HTTPStatus.OK, result)
+                return
+
             if self.path != "/api/recognize":
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return

@@ -59,4 +59,6 @@ class WritingPipeline:
                 original_text=recognition.text,
                 corrected_text=recognition.text,
                 confidence=0.0,
+                method="fallback",
+                status="preserved",
             )

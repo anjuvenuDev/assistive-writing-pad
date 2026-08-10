@@ -15,6 +15,7 @@ dependencies = [
   "pydantic>=2.0",
   "PyYAML>=6.0",
   "rapidfuzz>=3.0",
+  "symspellpy>=6.9",
   "jiwer>=3.0",
 ]
 
@@ -39,6 +40,9 @@ assistive-writing-web = "assistive_writing_pad.display.web_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+assistive_writing_pad = ["correction/resources/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

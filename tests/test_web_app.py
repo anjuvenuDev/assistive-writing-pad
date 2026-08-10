@@ -16,6 +16,15 @@ class StubStrokeGroupRecognizer:
         )
 
 
+class StubCorrectorWithFeedback(ContextualCorrector):
+    def __init__(self):
+        super().__init__(model_enabled=False)
+        self.feedback = []
+
+    def record_feedback(self, original: str, corrected: str) -> None:
+        self.feedback.append((original, corrected))
+
+
 def test_stroke_groups_from_payload_parses_strokes() -> None:
     points = stroke_groups_from_payload(
         {
@@ -58,6 +67,9 @@ def test_recognition_service_returns_realtime_correction_metadata() -> None:
     assert result["text"] == "the cat sat on a chair"
     assert result["needs_review"] is False
     assert result["mode"] == "ocr"
+    assert result["correction_status"] in {"automatic", "preserved", "suggestion"}
+    assert "correction_method" in result
+    assert isinstance(result["alternatives"], list)
     assert result["corrections"][0]["original"] == "teh"
 
 
@@ -73,3 +85,18 @@ def test_recognition_service_accepts_legacy_mode_values() -> None:
     )
 
     assert result["mode"] == "word"
+
+
+def test_feedback_accept_records_correction() -> None:
+    corrector = StubCorrectorWithFeedback()
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=corrector,
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    payload = {"decision": "accept", "original": "Blal", "selected": "ball"}
+    result = service.record_correction_feedback(payload)
+
+    assert result["ok"] is True
+    assert corrector.feedback == [("Blal", "ball")]
