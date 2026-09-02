@@ -21,11 +21,11 @@ What has been done so far:
 - Huion HS64 input probing, stroke simulation, JSON save/load helpers, and a minimal event reader
 - CPU-only stroke rasterization and preprocessing into 28x28 grayscale model inputs
 - Legacy rule/contextual correction layers for deterministic debugging
-- A Tkinter handwriting app and a browser-based web UI for writing, recognition, and basic text actions
+- Tkinter and browser handwriting UIs for writing, recognition, correction, and alternatives
 - Pretrained handwritten OCR support through TrOCR, with lazy loading and local cache usage
 - Real-time correction after recognition, using separate model-backed Hugging
   Face spelling, semantic real-word, and grammatical-error-correction stages
-- Tests covering capture, preprocessing, template recognition, TrOCR rendering, web payload parsing, and pipeline behavior
+- Tests covering capture, preprocessing, template recognition, TrOCR rendering, UI helpers, web payload parsing, and pipeline behavior
 
 The next major gaps are real handwriting accuracy benchmarking, broader sentence-level
 grammar evaluation, word/line segmentation refinement, and Raspberry Pi performance validation.
@@ -68,9 +68,10 @@ PYTHONPATH=src python -m assistive_writing_pad.display.web_app
 
 Then open `http://127.0.0.1:8000` in a browser.
 
-The older Tkinter interface is still available, but the browser UI is the
-preferred path because it works more reliably across laptop, tablet, and
-Raspberry Pi setups.
+The browser UI is the preferred path because it works more reliably across
+laptop, tablet, and Raspberry Pi setups. The Tkinter UI is still available and
+uses the same production OCR/correction pipeline with `Recognize`, `Try Next`,
+and `Clear Screen` controls.
 
 The main screen is intentionally small: write on the canvas, use `Recognize`
 for immediate OCR/correction, `Try Next` to cycle through OCR/model
@@ -79,8 +80,9 @@ text, corrections, confidence, and alternatives together. Raw OCR and pointer
 diagnostics are collapsed under technical details.
 
 The main recognizer is the pretrained handwritten OCR model
-`microsoft/trocr-base-handwritten`. Manual template learning is only fallback
-support, not the expected user workflow.
+`microsoft/trocr-base-handwritten`. The template recognizer remains available
+for isolated debugging tests, but it is not exposed in the production writing
+interfaces.
 
 Install model dependencies before using pretrained recognition. Use the setup
 script so PyTorch is installed from the CPU-only wheel index:
@@ -226,11 +228,5 @@ AWP_CORRECTION_MODE=contextual
 AWP_CORRECTION_MODE=rules
 ```
 
-Fallback template mode is still available for debugging:
-
-1. Write one character on the pad.
-2. Enter the correct label, for example `a`.
-3. Click `Save Template`.
-4. Write the character again to see recognized text update on the right.
-
-The saved templates live in `data/user_templates.json`, which is ignored by Git.
+The template recognizer remains unit-tested as an isolated debugging component.
+It is not part of the child-facing writing-pad workflow.
