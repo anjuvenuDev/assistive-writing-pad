@@ -120,6 +120,16 @@ browser UI is updated. The API returns both `recognized_text` and
 `corrected_text`; the textarea shows the corrected text, while raw OCR stays in
 the debug panel.
 
+The recognition path now uses stroke-geometry segmentation before model
+inference:
+
+- single-character inputs are post-processed with OCR cleanup, confusion
+  candidates, and deterministic shape hints for common dotted/stem letters
+- lines are clustered from stroke bounds instead of fixed canvas assumptions
+- clear word gaps are recognized independently, then rejoined with spaces
+- TrOCR beam outputs are preserved as ranked text alternatives for later
+  "try next match" UI recovery
+
 The default realtime path uses the contextual corrector with lightweight local
 checks enabled and Transformer reranking disabled:
 
@@ -138,6 +148,9 @@ AWP_CORRECTION_MODE=contextual
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
 AWP_PRELOAD_OCR_MODEL=1
+AWP_WORD_SEGMENT=1
+AWP_TROCR_NUM_BEAMS=3
+AWP_TROCR_CANDIDATES=3
 ```
 
 Enable `AWP_CONTEXTUAL_MODEL_ENABLED=1` only after the model is installed and

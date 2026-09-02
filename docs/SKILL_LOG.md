@@ -66,6 +66,19 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Merged duplicate confusion-map entries so case-pair candidates are not overwritten.
   - Verified `.venv/bin/python -m ruff check src tests` passes.
   - Verified `.venv/bin/python -m pytest` passes with 121 tests.
+  - Completed a Step 2 recognition pass for stroke geometry and OCR alternatives.
+  - Routed legacy `recognize()` through grouped recognition so all paths share
+    the same segmentation/post-processing behavior.
+  - Enabled conservative stroke-geometry word segmentation by default with
+    `AWP_WORD_SEGMENT=1`.
+  - Added TrOCR beam/candidate controls: `AWP_TROCR_NUM_BEAMS`,
+    `AWP_TROCR_CANDIDATES`, and `AWP_TROCR_MAX_WORD_SEGMENTS`.
+  - Wired single-character OCR cleanup, confusion candidates, and shape hints
+    into the live recognizer path.
+  - Added final text alternatives in metadata `top3` so the UI can support a
+    simple "try next match" action later.
+  - Added deterministic recognition segmentation tests that do not require
+    downloading or executing a TrOCR checkpoint.
 - Not yet implemented:
   - High-accuracy handwriting recognition model training
   - Full spelling/grammar/semantic correction models
@@ -213,6 +226,14 @@ Phase 4B:
 - Lint: `.venv/bin/python -m ruff check src tests` passed.
 - No recognition accuracy claim was made in this step; this was a reliability baseline
   before recognition, correction, and UI accuracy work.
+
+2026-09-02 recognition baseline:
+
+- Targeted recognition tests covered dotted-letter line grouping, word-gap
+  segmentation, crossed-letter grouping, short-word rejection in the
+  single-character gate, shape-hint promotion, and multi-word alternatives.
+- This step improved recognition orchestration and candidate handling. It still
+  requires real handwriting samples before accuracy can be measured honestly.
 
 Planned metrics:
 
