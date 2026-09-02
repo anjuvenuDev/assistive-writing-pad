@@ -17,6 +17,24 @@ def test_runtime_settings_reject_invalid_correction_mode() -> None:
         RuntimeSettings(correction_mode="cloud_only").validate()
 
 
+def test_runtime_settings_use_huggingface_correction_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("AWP_CORRECTION_MODE", raising=False)
+
+    assert RuntimeSettings.from_env().correction_mode == "hf"
+
+
+def test_runtime_settings_read_huggingface_correction_flags(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_HF_GRAMMAR_MODEL", "pszemraj/flan-t5-large-grammar-synthesis")
+    monkeypatch.setenv("AWP_HF_CORRECTION_LOCAL_FILES_ONLY", "1")
+    monkeypatch.setenv("AWP_HF_CORRECTION_CANDIDATES", "2")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.hf_grammar_model == "pszemraj/flan-t5-large-grammar-synthesis"
+    assert settings.hf_correction_local_files_only is True
+    assert settings.hf_correction_candidates == 2
+
+
 def test_runtime_settings_disable_contextual_model_by_default(monkeypatch) -> None:
     monkeypatch.delenv("AWP_CONTEXTUAL_MODEL_ENABLED", raising=False)
 

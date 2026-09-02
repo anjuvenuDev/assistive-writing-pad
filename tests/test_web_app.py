@@ -59,6 +59,7 @@ def test_recognition_service_returns_realtime_correction_metadata() -> None:
     assert result["needs_review"] is False
     assert result["mode"] == "ocr"
     assert result["corrections"][0]["original"] == "teh"
+    assert result["correction_metadata"] == {}
 
 
 def test_recognition_service_accepts_legacy_mode_values() -> None:

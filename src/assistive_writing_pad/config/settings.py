@@ -18,17 +18,30 @@ class RuntimeSettings:
     data_dir: Path = Path("data")
     api_correction_enabled: bool = False
     device_profile: str = "laptop"
-    correction_mode: str = "contextual"
+    correction_mode: str = "hf"
     contextual_model_enabled: bool = False
     contextual_model_name: str = "distilbert/distilbert-base-uncased"
     preload_ocr_model: bool = True
     max_correction_candidates: int = 8
     correction_confidence_threshold: float = 0.70
+    hf_spelling_model_enabled: bool = True
+    hf_spelling_model: str = "oliverguhr/spelling-correction-english-base"
+    hf_grammar_model_enabled: bool = True
+    hf_grammar_model: str = "gotutiyan/gec-bart-base"
+    hf_correction_local_files_only: bool = False
+    hf_correction_device: str = "auto"
+    hf_correction_num_beams: int = 4
+    hf_correction_candidates: int = 3
+    hf_correction_max_input_tokens: int = 128
+    hf_correction_max_new_tokens: int = 128
+    hf_correction_min_confidence: float = 0.0
+    hf_correction_max_change_ratio: float = 0.70
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
         device_profile = os.environ.get("AWP_DEVICE_PROFILE", "laptop").strip() or "laptop"
-        correction_mode = os.environ.get("AWP_CORRECTION_MODE", "contextual").strip() or "contextual"
+        correction_mode = os.environ.get("AWP_CORRECTION_MODE", cls.correction_mode).strip()
+        correction_mode = correction_mode or cls.correction_mode
         default_preload = "0" if device_profile == "raspberry_pi" else "1"
         settings = cls(
             confidence_threshold=_float_env("AWP_CONFIDENCE_THRESHOLD", cls.confidence_threshold),
@@ -56,6 +69,57 @@ class RuntimeSettings:
                 "AWP_CORRECTION_CONFIDENCE_THRESHOLD",
                 cls.correction_confidence_threshold,
             ),
+            hf_spelling_model_enabled=_bool_env(
+                "AWP_HF_SPELLING_MODEL_ENABLED",
+                cls.hf_spelling_model_enabled,
+            ),
+            hf_spelling_model=os.environ.get(
+                "AWP_HF_SPELLING_MODEL",
+                cls.hf_spelling_model,
+            ).strip()
+            or cls.hf_spelling_model,
+            hf_grammar_model_enabled=_bool_env(
+                "AWP_HF_GRAMMAR_MODEL_ENABLED",
+                cls.hf_grammar_model_enabled,
+            ),
+            hf_grammar_model=os.environ.get(
+                "AWP_HF_GRAMMAR_MODEL",
+                cls.hf_grammar_model,
+            ).strip()
+            or cls.hf_grammar_model,
+            hf_correction_local_files_only=_bool_env(
+                "AWP_HF_CORRECTION_LOCAL_FILES_ONLY",
+                cls.hf_correction_local_files_only,
+            ),
+            hf_correction_device=os.environ.get(
+                "AWP_HF_CORRECTION_DEVICE",
+                cls.hf_correction_device,
+            ).strip()
+            or cls.hf_correction_device,
+            hf_correction_num_beams=_int_env(
+                "AWP_HF_CORRECTION_NUM_BEAMS",
+                cls.hf_correction_num_beams,
+            ),
+            hf_correction_candidates=_int_env(
+                "AWP_HF_CORRECTION_CANDIDATES",
+                cls.hf_correction_candidates,
+            ),
+            hf_correction_max_input_tokens=_int_env(
+                "AWP_HF_CORRECTION_MAX_INPUT_TOKENS",
+                cls.hf_correction_max_input_tokens,
+            ),
+            hf_correction_max_new_tokens=_int_env(
+                "AWP_HF_CORRECTION_MAX_NEW_TOKENS",
+                cls.hf_correction_max_new_tokens,
+            ),
+            hf_correction_min_confidence=_float_env(
+                "AWP_HF_CORRECTION_MIN_CONFIDENCE",
+                cls.hf_correction_min_confidence,
+            ),
+            hf_correction_max_change_ratio=_float_env(
+                "AWP_HF_CORRECTION_MAX_CHANGE_RATIO",
+                cls.hf_correction_max_change_ratio,
+            ),
         )
         settings.validate()
         return settings
@@ -71,10 +135,22 @@ class RuntimeSettings:
             raise ValueError("max_sentence_latency_ms must be positive")
         if self.device_profile not in {"laptop", "raspberry_pi"}:
             raise ValueError("device_profile must be 'laptop' or 'raspberry_pi'")
-        if self.correction_mode not in {"rules", "contextual"}:
-            raise ValueError("correction_mode must be 'rules' or 'contextual'")
+        if self.correction_mode not in {"rules", "contextual", "hf"}:
+            raise ValueError("correction_mode must be 'rules', 'contextual', or 'hf'")
         if self.max_correction_candidates <= 0:
             raise ValueError("max_correction_candidates must be positive")
+        if self.hf_correction_num_beams <= 0:
+            raise ValueError("hf_correction_num_beams must be positive")
+        if self.hf_correction_candidates <= 0:
+            raise ValueError("hf_correction_candidates must be positive")
+        if self.hf_correction_max_input_tokens <= 0:
+            raise ValueError("hf_correction_max_input_tokens must be positive")
+        if self.hf_correction_max_new_tokens <= 0:
+            raise ValueError("hf_correction_max_new_tokens must be positive")
+        if not 0.0 <= self.hf_correction_min_confidence <= 1.0:
+            raise ValueError("hf_correction_min_confidence must be between 0 and 1")
+        if not 0.0 <= self.hf_correction_max_change_ratio <= 1.0:
+            raise ValueError("hf_correction_max_change_ratio must be between 0 and 1")
 
 
 def _bool_env(name: str, default: bool) -> bool:

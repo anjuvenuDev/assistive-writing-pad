@@ -23,167 +23,25 @@ except ImportError:  # pragma: no cover - only used in incomplete environments.
     process = None
 
 
-TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|\d+|\s+|[^\w\s]", re.ASCII)
-WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?$", re.ASCII)
+TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?|\s+|[^\w\s]", re.ASCII)
+WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?$", re.ASCII)
 
 DEFAULT_CONTEXT_MODEL = "distilbert/distilbert-base-uncased"
 
-COMMON_WORDS: Set[str] = {
-    "a",
-    "about",
-    "after",
-    "again",
-    "all",
-    "also",
-    "am",
-    "an",
-    "and",
-    "any",
-    "are",
-    "around",
-    "as",
-    "ask",
-    "at",
-    "away",
-    "back",
-    "be",
-    "because",
-    "been",
-    "before",
-    "big",
-    "book",
-    "boy",
-    "but",
-    "by",
-    "came",
-    "can",
-    "cat",
-    "chair",
-    "child",
-    "children",
-    "class",
-    "come",
-    "could",
-    "day",
-    "did",
-    "do",
-    "does",
-    "dog",
-    "doing",
-    "down",
-    "eat",
-    "for",
-    "friend",
-    "from",
-    "gave",
-    "get",
-    "girl",
-    "go",
-    "good",
-    "got",
-    "had",
-    "has",
-    "have",
-    "he",
-    "hear",
-    "help",
-    "her",
-    "here",
-    "hi",
-    "him",
-    "his",
-    "home",
-    "hope",
-    "house",
-    "i",
-    "in",
-    "is",
-    "it",
-    "jumped",
-    "jumbled",
-    "know",
-    "learn",
-    "left",
-    "letter",
-    "like",
-    "little",
-    "look",
-    "made",
-    "make",
-    "many",
-    "me",
-    "my",
-    "new",
-    "no",
-    "not",
-    "now",
-    "of",
-    "on",
-    "one",
-    "or",
-    "our",
-    "out",
-    "over",
-    "page",
-    "paper",
-    "pen",
-    "phone",
-    "play",
-    "put",
-    "read",
-    "receive",
-    "right",
-    "room",
-    "said",
-    "sat",
-    "saw",
-    "school",
-    "see",
-    "sentence",
-    "she",
-    "small",
-    "so",
-    "some",
-    "spelling",
-    "story",
-    "teacher",
-    "than",
-    "that",
-    "the",
-    "their",
-    "them",
-    "then",
-    "there",
-    "they",
-    "thing",
-    "this",
-    "time",
-    "to",
-    "too",
-    "two",
-    "up",
-    "use",
-    "very",
-    "want",
-    "was",
-    "we",
-    "went",
-    "were",
-    "well",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "will",
-    "with",
-    "word",
-    "work",
-    "write",
-    "writing",
-    "you",
-    "your",
-}
+COMMON_WORDS: Set[str] = set(
+    """
+    a about after again all also am an and any are around as ask at away back be
+    because been before big book but by came can cat chair child children class
+    come could day did do does dog doing down eat for friend from gave get girl
+    go good got had has have he hear help her here hi him his home hope house i
+    in is it jumped jumbled know learn left letter like little look made make
+    many me my new no not now of on one or our out over page paper pen phone
+    play put read receive right room said sat saw school see sentence she small
+    so some spelling story teacher than that the their them then there they
+    thing this time to too two up use very want was we went were well what when
+    where which who will with word work write writing you your
+    """.split()
+)
 
 DYSLEXIA_VARIANTS: Dict[str, Tuple[str, ...]] = {
     "b": ("d", "p"),
@@ -251,7 +109,7 @@ class ContextualCorrector:
         corrections: List[Correction] = []
 
         for index, token in enumerate(tokens):
-            if not WORD_RE.match(token):
+            if not WORD_RE.match(token) or not any(char.isalpha() for char in token):
                 continue
             candidates = self._candidates_for(token)
             ranked = self._rank_candidates(tokens, index, candidates)

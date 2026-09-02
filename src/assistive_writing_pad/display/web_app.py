@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import CorrectionResult, PipelineResult, StrokePoint
-from assistive_writing_pad.correction.contextual import ContextualCorrector
+from assistive_writing_pad.correction.factory import corrector_from_settings
 from assistive_writing_pad.pipeline import WritingPipeline
 from assistive_writing_pad.recognition.trocr import RecognitionUnavailable, TrOCRHandwritingRecognizer
 
@@ -933,7 +933,7 @@ class RecognitionService:
         self.recognizer = recognizer or TrOCRHandwritingRecognizer()
         self.pipeline = WritingPipeline(
             recognizer=self.recognizer,
-            corrector=corrector or ContextualCorrector.from_settings(self.settings),
+            corrector=corrector or corrector_from_settings(self.settings),
             settings=self.settings,
         )
 
@@ -975,6 +975,7 @@ class RecognitionService:
             "confidence": result.confidence,
             "correction_confidence": correction.confidence,
             "corrections": corrections_payload(correction),
+            "correction_metadata": correction.metadata,
             "needs_review": pipeline_result.needs_review,
             "review_reason": pipeline_result.review_reason,
             "status": status_message(pipeline_result),

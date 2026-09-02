@@ -7,7 +7,7 @@ The project is designed for laptop-first development and Raspberry Pi 4 migratio
 - Python 3.9+
 - CPU-only inference
 - Offline local handwriting recognition
-- Hybrid grammar/semantic correction with offline fallback
+- Hugging Face seq2seq spelling and grammatical-error correction
 - Modular pipeline for capture, preprocessing, recognition, correction, display, and evaluation
 
 ## Current Status
@@ -20,11 +20,11 @@ What has been done so far:
 - Runtime settings with Raspberry Pi validation and a deterministic demo recognizer for early testing
 - Huion HS64 input probing, stroke simulation, JSON save/load helpers, and a minimal event reader
 - CPU-only stroke rasterization and preprocessing into 28x28 grayscale model inputs
-- A rule-based correction layer for early dysgraphia-style error patterns
+- Legacy rule/contextual correction layers for deterministic debugging
 - A Tkinter handwriting app and a browser-based web UI for writing, recognition, and basic text actions
 - Pretrained handwritten OCR support through TrOCR, with lazy loading and local cache usage
-- Real-time correction after recognition, including spelling, dysgraphia-style error patterns,
-  semantic context heuristics, and an optional pretrained contextual language model
+- Real-time correction after recognition, using a model-backed Hugging Face
+  spelling stage followed by a grammatical-error-correction stage
 - Tests covering capture, preprocessing, template recognition, TrOCR rendering, web payload parsing, and pipeline behavior
 
 The next major gaps are real handwriting accuracy benchmarking, broader sentence-level
@@ -130,21 +130,25 @@ inference:
 - TrOCR beam outputs are preserved as ranked text alternatives for later
   "try next match" UI recovery
 
-The default realtime path uses the contextual corrector with lightweight local
-checks enabled and Transformer reranking disabled:
+The default realtime path uses a Hugging Face model pipeline:
 
-- deterministic spelling and dysgraphia-pattern checks
-- fuzzy candidate generation for swaps, omissions, insertions, doubling, and
-  visual confusions
-- semantic context heuristics for common real-word mistakes
-- optional pretrained masked-language reranking through
-  `distilbert/distilbert-base-uncased`
+- spelling/typo correction with `oliverguhr/spelling-correction-english-base`
+- grammatical-error correction with `gotutiyan/gec-bart-base`
+- beam-search alternatives returned in correction metadata for review and
+  future "try next match" UI flows
+- hallucination guardrails that reject empty, unrelated, or oversized model
+  generations rather than silently inventing corrections
 
 Useful runtime flags:
 
 ```bash
 AWP_DEVICE_PROFILE=laptop
-AWP_CORRECTION_MODE=contextual
+AWP_CORRECTION_MODE=hf
+AWP_HF_SPELLING_MODEL=oliverguhr/spelling-correction-english-base
+AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
+AWP_HF_CORRECTION_CANDIDATES=3
+AWP_HF_CORRECTION_NUM_BEAMS=4
+AWP_HF_CORRECTION_LOCAL_FILES_ONLY=0
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
 AWP_PRELOAD_OCR_MODEL=1
@@ -153,23 +157,39 @@ AWP_TROCR_NUM_BEAMS=3
 AWP_TROCR_CANDIDATES=3
 ```
 
-Enable `AWP_CONTEXTUAL_MODEL_ENABLED=1` only after the model is installed and
-verified on the target laptop. Recognition should still work if correction
-model loading fails; the API falls back to raw recognized text.
+For Raspberry Pi latency experiments, `AWP_HF_GRAMMAR_MODEL` can be switched to
+`Unbabel/gec-t5_small`. For higher quality laptop experiments, it can be
+switched to `pszemraj/flan-t5-large-grammar-synthesis` or `grammarly/coedit-large`,
+but those models are much larger and should be benchmarked for latency before
+use on the writing pad.
 
-For Raspberry Pi migration, keep the same pipeline but disable the contextual
-Transformer by default:
+Recognition should still work if correction model loading fails; the API falls
+back to raw recognized text and returns model error metadata instead of applying
+fake corrections.
+
+For Raspberry Pi migration, keep the same backend but run from a prefilled local
+model cache:
 
 ```bash
 AWP_DEVICE_PROFILE=raspberry_pi
 AWP_TROCR_MODEL=microsoft/trocr-small-handwritten
-AWP_CONTEXTUAL_MODEL_ENABLED=0
+AWP_CORRECTION_MODE=hf
+AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
+AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1
 AWP_PRELOAD_OCR_MODEL=0
 ```
 
 The project tracks "nearly 100%" accuracy as an evaluation target. It should be
 reported with measured correction accuracy, false-positive rate, and latency on
 curated handwriting samples rather than treated as a guaranteed runtime claim.
+
+The older `contextual` and `rules` correction modes remain available only for
+debugging:
+
+```bash
+AWP_CORRECTION_MODE=contextual
+AWP_CORRECTION_MODE=rules
+```
 
 Fallback template mode is still available for debugging:
 

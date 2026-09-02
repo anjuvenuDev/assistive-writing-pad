@@ -49,6 +49,7 @@ class CorrectionResult:
     corrected_text: str
     corrections: Tuple[Correction, ...] = ()
     confidence: float = 1.0
+    metadata: Dict[str, str] = field(default_factory=dict)
 
     @property
     def changed(self) -> bool:
