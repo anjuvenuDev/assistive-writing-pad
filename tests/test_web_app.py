@@ -3,7 +3,7 @@ import pytest
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import RecognitionResult
 from assistive_writing_pad.correction.contextual import ContextualCorrector
-from assistive_writing_pad.display.web_app import RecognitionService, stroke_groups_from_payload
+from assistive_writing_pad.display.web_app import HTML, RecognitionService, stroke_groups_from_payload
 
 
 class StubStrokeGroupRecognizer:
@@ -74,3 +74,40 @@ def test_recognition_service_accepts_legacy_mode_values() -> None:
     )
 
     assert result["mode"] == "word"
+
+
+def test_recognition_service_corrects_alternative_text() -> None:
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=ContextualCorrector(model_enabled=False),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    result = service.correct_payload({"text": "teh cat sat on a chaier"})
+
+    assert result["recognized_text"] == "teh cat sat on a chaier"
+    assert result["corrected_text"] == "the cat sat on a chair"
+    assert result["corrections"][0]["original"] == "teh"
+    assert result["mode"] == "text"
+
+
+def test_recognition_service_rejects_non_string_correction_text() -> None:
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=ContextualCorrector(model_enabled=False),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    with pytest.raises(ValueError, match="text must be a string"):
+        service.correct_payload({"text": ["teh"]})
+
+
+def test_browser_ui_keeps_child_facing_controls_simple() -> None:
+    assert 'id="recognize"' in HTML
+    assert 'id="tryNext"' in HTML
+    assert 'id="clearScreen"' in HTML
+    assert 'id="space"' not in HTML
+    assert 'id="backspace"' not in HTML
+    assert 'id="clearText"' not in HTML
+    assert "scripts/setup_model_env.sh" not in HTML
+    assert "Pointer diagnostics" not in HTML

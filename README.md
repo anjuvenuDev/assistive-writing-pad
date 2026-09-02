@@ -72,6 +72,12 @@ The older Tkinter interface is still available, but the browser UI is the
 preferred path because it works more reliably across laptop, tablet, and
 Raspberry Pi setups.
 
+The main screen is intentionally small: write on the canvas, use `Recognize`
+for immediate OCR/correction, `Try Next` to cycle through OCR/model
+alternatives when the first result is wrong, and `Clear Screen` to reset ink,
+text, corrections, confidence, and alternatives together. Raw OCR and pointer
+diagnostics are collapsed under technical details.
+
 The main recognizer is the pretrained handwritten OCR model
 `microsoft/trocr-base-handwritten`. Manual template learning is only fallback
 support, not the expected user workflow.

@@ -85,7 +85,7 @@ HTML = """<!doctype html>
       font-weight: 700;
       letter-spacing: 0;
     }
-    .hint, #status {
+    #status {
       color: var(--muted);
       font-size: 14px;
       line-height: 1.4;
@@ -171,6 +171,10 @@ HTML = """<!doctype html>
       color: #fff;
     }
     button.primary:hover { background: var(--accent-dark); }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     #recognized {
       width: 100%;
       min-height: 280px;
@@ -182,20 +186,6 @@ HTML = """<!doctype html>
       line-height: 1.35;
       color: var(--ink);
       background: #fbfcfd;
-    }
-    .setup {
-      margin-top: 14px;
-      border-top: 1px solid var(--line);
-      padding-top: 14px;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.5;
-    }
-    code {
-      background: #eef2f7;
-      border-radius: 4px;
-      padding: 2px 5px;
-      color: #344054;
     }
     /* Pointer input diagnostics panel */
     #pointer-debug {
@@ -314,6 +304,10 @@ HTML = """<!doctype html>
       transition: background 0.12s;
     }
     .top3-item:hover { background: #e8f0fe; border-color: var(--accent); }
+    .top3-item.top3-active {
+      border-color: var(--accent);
+      background: #eff6ff;
+    }
     .top3-rank {
       font-size: 11px;
       color: var(--muted);
@@ -322,13 +316,12 @@ HTML = """<!doctype html>
       flex-shrink: 0;
     }
     .top3-char {
-      font-size: 24px;
-      font-weight: 700;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: 15px;
+      font-weight: 650;
       color: var(--ink);
-      width: 32px;
-      text-align: center;
-      flex-shrink: 0;
-      font-family: monospace;
+      flex: 1;
     }
     .top3-bar-wrap {
       flex: 1;
@@ -371,32 +364,18 @@ HTML = """<!doctype html>
   <main>
     <section>
       <div class="section-title">
-        <h2>Handwriting</h2>
-        <div class="hint">Write a word or short line. Recognition runs after you pause.</div>
+        <h2>Write</h2>
       </div>
       <canvas id="pad"></canvas>
-      <!-- Pointer diagnostics: always visible so input problems are immediately obvious -->
-      <div id="pointer-debug">
-        <div class="pdl">
-          <span>Type: <b id="pd-type">&mdash;</b></span>
-          <span>X: <b id="pd-x">&mdash;</b></span>
-          <span>Y: <b id="pd-y">&mdash;</b></span>
-          <span>Drawing: <b id="pd-drawing" class="drawing-no">no</b></span>
-          <span>Strokes: <b id="pd-strokes">0</b></span>
-        </div>
-        <div id="pointer-log">Canvas event logs will appear here...</div>
-      </div>
       <div class="toolbar">
-        <button class="primary" id="recognize">Recognize Now</button>
-        <button id="clearInk">Clear Ink</button>
-        <button id="space">Space</button>
-        <button id="backspace">Backspace</button>
-        <button id="clearText">Clear Text</button>
+        <button class="primary" id="recognize">Recognize</button>
+        <button id="tryNext" disabled>Try Next</button>
+        <button id="clearScreen">Clear Screen</button>
       </div>
     </section>
     <section>
       <div class="section-title">
-        <h2>Recognized Text</h2>
+        <h2>Result</h2>
         <span id="confidence">&mdash;</span>
       </div>
       <textarea id="recognized" spellcheck="false"></textarea>
@@ -411,7 +390,7 @@ HTML = """<!doctype html>
       </div>
       <!-- OCR candidate panel -->
       <div id="top3-panel">
-        <div class="top3-title">Top Predictions</div>
+        <div class="top3-title">Alternatives</div>
         <div class="top3-list" id="top3-list">
           <div class="top3-item top3-hidden" id="top3-0" data-rank="0">
             <span class="top3-rank">1</span>
@@ -446,14 +425,19 @@ HTML = """<!doctype html>
         </div>
       </div>
       <details class="debug-panel">
-        <summary>Debug: raw OCR output</summary>
+        <summary>Technical Details</summary>
         <div id="raw-text">No recognition yet.</div>
+        <div id="pointer-debug">
+          <div class="pdl">
+            <span>Type: <b id="pd-type">&mdash;</b></span>
+            <span>X: <b id="pd-x">&mdash;</b></span>
+            <span>Y: <b id="pd-y">&mdash;</b></span>
+            <span>Drawing: <b id="pd-drawing" class="drawing-no">no</b></span>
+            <span>Strokes: <b id="pd-strokes">0</b></span>
+          </div>
+          <div id="pointer-log">No pointer events yet.</div>
+        </div>
       </details>
-      <div class="setup">
-        Pretrained OCR uses <code>microsoft/trocr-base-handwritten</code> with line-aware
-        segmentation. If recognition reports missing dependencies, create a Python 3.10
-        environment and run <code>scripts/setup_model_env.sh</code>.
-      </div>
     </section>
   </main>
   <script>
@@ -466,6 +450,7 @@ HTML = """<!doctype html>
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
     const rawTextEl    = document.getElementById("raw-text");
+    const tryNextEl    = document.getElementById("tryNext");
     const correctionConfidenceEl = document.getElementById("correction-confidence");
     const correctionListEl = document.getElementById("correction-list");
     const pdType       = document.getElementById("pd-type");
@@ -484,6 +469,8 @@ HTML = """<!doctype html>
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
     let currentMode    = "ocr";
+    let lastRecognitionAlternatives = [];
+    let lastAlternativeIndex = 0;
 
     /* -----------------------------------------------------------------------
      * Diagnostics logger
@@ -734,8 +721,7 @@ HTML = """<!doctype html>
         return;
       }
       statusEl.textContent = "Recognizing\u2026";
-      confidenceEl.textContent = "\u2014";
-      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      resetConfidenceBadge();
       console.log("[AWP] recognize mode:", currentMode);
       try {
         const response = await fetch("/api/recognize", {
@@ -745,31 +731,135 @@ HTML = """<!doctype html>
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
-        recognizedEl.value = result.corrected_text || result.text || "";
-        updateConfidenceBadge(
-          Number(result.confidence || 0),
-          Number(result.correction_confidence || 1)
-        );
-        const usedMode = result.mode || currentMode;
-        const reviewSuffix = result.needs_review ? "  Review" : "";
-        statusEl.textContent = (result.status || "Recognized") + "  [" + usedMode + " mode]" + reviewSuffix;
-        console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "corrections:", result.corrections, "top5:", result.top3);
-        // Surface raw OCR output / recognizer info in the debug panel.
-        const meta = result.metadata || {};
-        const recognizerName = meta.recognizer || "trocr";
-        const lineResults = meta.line_results ? JSON.parse(meta.line_results) : [];
-        const rawLines = lineResults
-          .map(l => "Line " + l.line_index + ": " + (l.raw_text || "(empty)"))
-          .join("\\n");
-        const rawRecognized = result.recognized_text || meta.raw_text || result.text || "(none)";
-        rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
-        pdStrokes.textContent = strokes.length;
-        renderCorrections(result.corrections || []);
-        // Render OCR candidates when the recognizer returns them.
-        renderTop3(result.top3 || []);
+        lastRecognitionAlternatives = buildRecognitionAlternatives(result);
+        lastAlternativeIndex = 0;
+        applyRecognitionResult(result);
       } catch (err) {
         statusEl.textContent = err.message;
       }
+    }
+
+    async function correctText(rawText) {
+      const response = await fetch("/api/correct", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text: rawText})
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Correction failed");
+      return result;
+    }
+
+    function applyRecognitionResult(result) {
+      recognizedEl.value = result.corrected_text || result.text || "";
+      updateConfidenceBadge(
+        Number(result.confidence || 0),
+        Number(result.correction_confidence || 1)
+      );
+      const usedMode = result.mode || currentMode;
+      const reviewSuffix = result.needs_review ? "  Review" : "";
+      statusEl.textContent = (result.status || "Recognized") + reviewSuffix;
+      console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "corrections:", result.corrections, "alternatives:", lastRecognitionAlternatives);
+      updateRawDetails(result);
+      pdStrokes.textContent = strokes.length;
+      renderCorrections(result.corrections || []);
+      renderTop3(lastRecognitionAlternatives);
+      updateAlternativeButton();
+    }
+
+    async function useAlternative(index) {
+      const alternative = lastRecognitionAlternatives[index];
+      if (!alternative) return;
+
+      lastAlternativeIndex = index;
+      renderTop3(lastRecognitionAlternatives);
+      updateAlternativeButton();
+      statusEl.textContent = "Correcting option " + (index + 1) + "\u2026";
+
+      try {
+        const result = await correctText(alternative.text);
+        recognizedEl.value = result.corrected_text || alternative.text;
+        updateConfidenceBadge(
+          Number(alternative.confidence || 0),
+          Number(result.correction_confidence || 1)
+        );
+        statusEl.textContent = "Using option " + (index + 1) + " of " + lastRecognitionAlternatives.length;
+        rawTextEl.textContent = "[alternative] " + alternative.text;
+        renderCorrections(result.corrections || []);
+      } catch (err) {
+        statusEl.textContent = err.message;
+      }
+    }
+
+    function tryNextAlternative() {
+      if (lastRecognitionAlternatives.length < 2) {
+        statusEl.textContent = "No other option yet.";
+        return;
+      }
+      const nextIndex = (lastAlternativeIndex + 1) % lastRecognitionAlternatives.length;
+      useAlternative(nextIndex);
+    }
+
+    function updateRawDetails(result) {
+      const meta = result.metadata || {};
+      const recognizerName = meta.recognizer || "trocr";
+      const lineResults = parseJsonArray(meta.line_results);
+      const rawLines = lineResults
+        .map(l => "Line " + l.line_index + ": " + (l.raw_text || "(empty)"))
+        .join("\\n");
+      const rawRecognized = result.recognized_text || meta.raw_text || result.text || "(none)";
+      rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
+    }
+
+    function buildRecognitionAlternatives(result) {
+      const alternatives = [];
+      const seen = new Set();
+      addUniqueAlternative(alternatives, seen, result.recognized_text || result.text, result.confidence);
+      (result.top3 || []).forEach(item => {
+        const text = Array.isArray(item) ? item[0] : item.text;
+        const confidence = Array.isArray(item) ? item[1] : item.confidence;
+        addUniqueAlternative(alternatives, seen, text, confidence);
+      });
+
+      const correctionMeta = result.correction_metadata || {};
+      parseJsonArray(correctionMeta.stages).forEach(stage => {
+        (stage.alternatives || []).forEach(item => {
+          addUniqueAlternative(alternatives, seen, item.text, item.confidence);
+        });
+      });
+      return alternatives;
+    }
+
+    function addUniqueAlternative(alternatives, seen, text, confidence) {
+      const value = String(text || "").trim();
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      alternatives.push({
+        text: value,
+        confidence: Number(confidence || 0)
+      });
+    }
+
+    function parseJsonArray(value) {
+      if (!value) return [];
+      try {
+        const parsed = typeof value === "string" ? JSON.parse(value) : value;
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function updateAlternativeButton() {
+      tryNextEl.disabled = lastRecognitionAlternatives.length < 2;
+    }
+
+    function resetConfidenceBadge() {
+      confidenceEl.textContent = "\u2014";
+      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
+      correctionConfidenceEl.textContent = "\u2014";
     }
 
     /**
@@ -828,11 +918,6 @@ HTML = """<!doctype html>
       });
     }
 
-    /**
-     * Render up to 5 candidate predictions.
-     * OCR returns optional candidate text/confidence pairs.
-     * Clicking any prediction card inserts that candidate into the recognized textarea.
-     */
     function renderTop3(top3) {
       const MAX_SLOTS = 5;
       for (let i = 0; i < MAX_SLOTS; i++) {
@@ -842,30 +927,33 @@ HTML = """<!doctype html>
         const pctEl  = document.getElementById("top3-pct-" + i);
         if (!item) continue;  // slot may not exist yet
         if (i < top3.length) {
-          const [ch, conf] = top3[i];
-          charEl.textContent = ch || "?";
+          const entry = top3[i];
+          const text = Array.isArray(entry) ? entry[0] : entry.text;
+          const conf = Array.isArray(entry) ? entry[1] : entry.confidence;
+          charEl.textContent = text || "?";
           const pct = Math.min(100, Math.max(0, Math.round((conf || 0) * 100)));
           barEl.style.width  = pct + "%";
           pctEl.textContent  = pct + "%";
           item.classList.remove("top3-hidden");
-          // Click: replace the last character in textarea with this prediction.
-          item.onclick = () => {
-            const val = recognizedEl.value;
-            // If recognizedEl already ends with the top-1 char, replace it; otherwise append.
-            recognizedEl.value = (val.trimEnd() || "");
-            if (recognizedEl.value.length > 0) recognizedEl.value += " ";
-            recognizedEl.value += ch;
-          };
+          item.classList.toggle("top3-active", i === lastAlternativeIndex);
+          item.onclick = () => useAlternative(i);
         } else {
           item.classList.add("top3-hidden");
+          item.classList.remove("top3-active");
           item.onclick = null;
         }
       }
     }
 
-    function clearInk() {
+    function clearScreen() {
       strokes = [];
       currentStroke = [];
+      lastRecognitionAlternatives = [];
+      lastAlternativeIndex = 0;
+      if (recognizeTimer) {
+        clearTimeout(recognizeTimer);
+        recognizeTimer = null;
+      }
 
       // Clear at device-pixel scale (identity transform), then re-apply DPR.
       const ratio = window.devicePixelRatio || 1;
@@ -875,15 +963,14 @@ HTML = """<!doctype html>
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       applyDrawingStyle();
 
-      confidenceEl.textContent = "\u2014";
-      confidenceEl.classList.remove("conf-high", "conf-med", "conf-low");
-      correctionConfidenceEl.textContent = "\u2014";
+      recognizedEl.value = "";
+      resetConfidenceBadge();
       rawTextEl.textContent = "No recognition yet.";
-      statusEl.textContent = "Ink cleared";
+      statusEl.textContent = "Ready";
       pdStrokes.textContent = "0";
       renderCorrections([]);
-      // Clear top-3 panel.
       renderTop3([]);
+      updateAlternativeButton();
     }
 
     /* -----------------------------------------------------------------------
@@ -903,19 +990,14 @@ HTML = """<!doctype html>
 
     // Toolbar buttons
     document.getElementById("recognize").addEventListener("click", recognize);
-    document.getElementById("clearInk").addEventListener("click", clearInk);
-    document.getElementById("space").addEventListener("click", () => { recognizedEl.value += " "; });
-    document.getElementById("backspace").addEventListener("click", () => {
-      recognizedEl.value = recognizedEl.value.slice(0, -1);
-    });
-    document.getElementById("clearText").addEventListener("click", () => {
-      recognizedEl.value = "";
-    });
+    document.getElementById("tryNext").addEventListener("click", tryNextAlternative);
+    document.getElementById("clearScreen").addEventListener("click", clearScreen);
 
     // Initial canvas setup.
     resizeCanvas();
     renderCorrections([]);
     renderTop3([]);  // initialise top-3 panel in hidden state
+    updateAlternativeButton();
   </script>
 </body>
 </html>
@@ -984,6 +1066,28 @@ class RecognitionService:
             "mode": result.metadata.get("mode", mode),
         }
 
+    def correct_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        text = payload.get("text", "")
+        if not isinstance(text, str):
+            raise ValueError("text must be a string")
+
+        correction = self.pipeline.corrector.correct(text)
+        return {
+            "text": correction.corrected_text,
+            "recognized_text": text,
+            "corrected_text": correction.corrected_text,
+            "confidence": 1.0,
+            "correction_confidence": correction.confidence,
+            "corrections": corrections_payload(correction),
+            "correction_metadata": correction.metadata,
+            "needs_review": False,
+            "review_reason": None,
+            "status": "Corrected alternative.",
+            "metadata": {},
+            "top3": [],
+            "mode": "text",
+        }
+
 
 def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
     return [
@@ -1046,14 +1150,17 @@ def make_handler(service: RecognitionService):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path != "/api/recognize":
+            if self.path not in {"/api/recognize", "/api/correct"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
 
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
-                result = service.recognize_payload(payload)
+                if self.path == "/api/recognize":
+                    result = service.recognize_payload(payload)
+                else:
+                    result = service.correct_payload(payload)
             except RecognitionUnavailable as exc:
                 self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
                 return
