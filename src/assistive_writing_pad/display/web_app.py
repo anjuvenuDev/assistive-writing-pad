@@ -1020,10 +1020,12 @@ class RecognitionService:
         )
 
     def warm_up_async(self) -> None:
-        if not self.settings.preload_ocr_model:
-            return
-        thread = threading.Thread(target=self._warm_up_ocr_model, daemon=True)
-        thread.start()
+        if self.settings.preload_ocr_model:
+            thread = threading.Thread(target=self._warm_up_ocr_model, daemon=True)
+            thread.start()
+        if self.settings.preload_correction_models:
+            thread = threading.Thread(target=self._warm_up_correction_models, daemon=True)
+            thread.start()
 
     def _warm_up_ocr_model(self) -> None:
         ensure_loaded = getattr(self.recognizer, "_ensure_loaded", None)
@@ -1034,6 +1036,16 @@ class RecognitionService:
             logger.info("OCR model warmed up")
         except Exception as exc:
             logger.warning("OCR model warm-up failed; first recognition may retry: %s", exc)
+
+    def _warm_up_correction_models(self) -> None:
+        warm_up = getattr(self.pipeline.corrector, "warm_up", None)
+        if not callable(warm_up):
+            return
+        try:
+            warm_up()
+            logger.info("correction models warmed up")
+        except Exception as exc:
+            logger.warning("correction model warm-up failed; first correction may retry: %s", exc)
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)

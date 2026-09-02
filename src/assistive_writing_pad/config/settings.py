@@ -22,6 +22,7 @@ class RuntimeSettings:
     contextual_model_enabled: bool = False
     contextual_model_name: str = "distilbert/distilbert-base-uncased"
     preload_ocr_model: bool = True
+    preload_correction_models: bool = True
     max_correction_candidates: int = 8
     correction_confidence_threshold: float = 0.70
     hf_spelling_model_enabled: bool = True
@@ -67,6 +68,10 @@ class RuntimeSettings:
             ).strip()
             or cls.contextual_model_name,
             preload_ocr_model=_bool_env("AWP_PRELOAD_OCR_MODEL", default_preload == "1"),
+            preload_correction_models=_bool_env(
+                "AWP_PRELOAD_CORRECTION_MODELS",
+                default_preload == "1",
+            ),
             max_correction_candidates=_int_env(
                 "AWP_MAX_CORRECTION_CANDIDATES", cls.max_correction_candidates
             ),

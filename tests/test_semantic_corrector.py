@@ -16,6 +16,15 @@ class StaticSemanticScorer:
         }
 
 
+class WarmableSemanticScorer(StaticSemanticScorer):
+    def __init__(self, scores: Mapping[str, Mapping[str, float]]) -> None:
+        super().__init__(scores)
+        self.warm_up_count = 0
+
+    def warm_up(self) -> None:
+        self.warm_up_count += 1
+
+
 def test_semantic_runner_corrects_real_word_error_with_context_score() -> None:
     runner = SemanticCorrectionRunner(
         model_name="fake-semantic",
@@ -77,3 +86,12 @@ def test_semantic_runner_handles_multiple_context_choices() -> None:
     result = runner.generate("I went too school and their is a book.")
 
     assert result[0].text == "I went to school and there is a book."
+
+
+def test_semantic_runner_warm_up_delegates_to_scorer() -> None:
+    scorer = WarmableSemanticScorer({})
+    runner = SemanticCorrectionRunner(model_name="fake-semantic", scorer=scorer)
+
+    runner.warm_up()
+
+    assert scorer.warm_up_count == 1

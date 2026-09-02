@@ -8,6 +8,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import sys
+import time
 
 _SRC = Path(__file__).parent.parent / "src"
 if str(_SRC) not in sys.path:
@@ -52,6 +53,35 @@ def main() -> int:
         default=None,
         help="Limit cases for quick smoke tests.",
     )
+    parser.add_argument(
+        "--no-warm-up",
+        action="store_true",
+        help="Skip model warm-up before timed evaluation.",
+    )
+    parser.add_argument(
+        "--min-accuracy",
+        type=float,
+        default=0.98,
+        help="Fail if exact-match accuracy is below this value.",
+    )
+    parser.add_argument(
+        "--max-false-positive-rate",
+        type=float,
+        default=0.0,
+        help="Fail if clean-text false-positive rate is above this value.",
+    )
+    parser.add_argument(
+        "--max-missed-corrections",
+        type=int,
+        default=0,
+        help="Fail if missed corrections exceed this count.",
+    )
+    parser.add_argument(
+        "--max-p95-latency-ms",
+        type=float,
+        default=None,
+        help="Optional p95 latency ceiling for the timed correction pass.",
+    )
     args = parser.parse_args()
 
     cases = load_correction_cases(args.manifest)
@@ -68,15 +98,79 @@ def main() -> int:
         settings = replace(settings, **updates)
         settings.validate()
 
-    report = evaluate_correction_cases(cases, corrector_from_settings(settings))
+    corrector = corrector_from_settings(settings)
+    warm_up_ms = 0.0
+    if not args.no_warm_up:
+        warm_up_ms = warm_up_corrector(corrector)
+
+    report = evaluate_correction_cases(cases, corrector)
     print_report(report)
+    if warm_up_ms > 0.0:
+        print()
+        print(f"Warm-up time: {warm_up_ms:.1f} ms")
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
         print(f"Wrote {args.output}")
 
-    return 0 if report.summary.false_positives == 0 else 2
+    gate_failures = correction_gate_failures(
+        report,
+        min_accuracy=args.min_accuracy,
+        max_false_positive_rate=args.max_false_positive_rate,
+        max_missed_corrections=args.max_missed_corrections,
+        max_p95_latency_ms=args.max_p95_latency_ms,
+    )
+    if gate_failures:
+        print()
+        print("Gate failures")
+        for failure in gate_failures:
+            print(f"- {failure}")
+        return 2
+
+    print()
+    print("Gate passed")
+    return 0
+
+
+def warm_up_corrector(corrector: object) -> float:
+    warm_up = getattr(corrector, "warm_up", None)
+    if not callable(warm_up):
+        return 0.0
+    print("Warming correction models before timed evaluation...")
+    started = time.perf_counter()
+    warm_up()
+    return (time.perf_counter() - started) * 1000.0
+
+
+def correction_gate_failures(
+    report,
+    *,
+    min_accuracy: float,
+    max_false_positive_rate: float,
+    max_missed_corrections: int,
+    max_p95_latency_ms: float | None,
+) -> list[str]:
+    summary = report.summary
+    failures = []
+    if summary.accuracy < min_accuracy:
+        failures.append(f"accuracy {summary.accuracy:.1%} is below {min_accuracy:.1%}")
+    if summary.false_positive_rate > max_false_positive_rate:
+        failures.append(
+            "false-positive rate "
+            f"{summary.false_positive_rate:.1%} is above {max_false_positive_rate:.1%}"
+        )
+    if summary.missed_corrections > max_missed_corrections:
+        failures.append(
+            f"missed corrections {summary.missed_corrections} exceed "
+            f"{max_missed_corrections}"
+        )
+    if max_p95_latency_ms is not None and summary.p95_latency_ms > max_p95_latency_ms:
+        failures.append(
+            f"p95 latency {summary.p95_latency_ms:.1f} ms is above "
+            f"{max_p95_latency_ms:.1f} ms"
+        )
+    return failures
 
 
 def print_report(report) -> None:

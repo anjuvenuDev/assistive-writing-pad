@@ -160,6 +160,7 @@ AWP_HF_CORRECTION_LOCAL_FILES_ONLY=0
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
 AWP_PRELOAD_OCR_MODEL=1
+AWP_PRELOAD_CORRECTION_MODELS=1
 AWP_WORD_SEGMENT=1
 AWP_TROCR_NUM_BEAMS=3
 AWP_TROCR_CANDIDATES=3
@@ -186,6 +187,7 @@ AWP_HF_SEMANTIC_MODEL=distilbert/distilbert-base-uncased
 AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1
 AWP_PRELOAD_OCR_MODEL=0
+AWP_PRELOAD_CORRECTION_MODELS=0
 ```
 
 The project tracks "nearly 100%" accuracy as an evaluation target. It should be
@@ -200,15 +202,21 @@ Run the correction gate against the committed curated manifest:
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/evaluate_correction.py --local-files-only --output data/evaluation/correction_report.json
 ```
 
+The evaluator warms the correction models before timing by default. Use
+`--no-warm-up` only when measuring cold-start behavior, and add
+`--max-p95-latency-ms` when validating a specific hardware latency target.
+
 The current cached HF correction baseline on this machine is:
 
 - 12/12 exact matches on the curated correction set
 - 0/2 false positives on clean text
-- average latency 1008.7 ms, p95 latency 2312.2 ms
+- average latency 703.3 ms, p95 latency 852.0 ms after model warm-up
+- correction model warm-up time 3252.3 ms
 
 This is a small benchmark set, not a guarantee for all handwriting. The mixed
-spelling-plus-grammar case is still too slow for the target real-time feel and
-must be optimized before Raspberry Pi validation.
+spelling-plus-grammar case is now within the laptop gate, but Raspberry Pi
+latency still needs to be measured against the local model cache before calling
+the hardware path production-ready.
 
 The older `contextual` and `rules` correction modes remain available only for
 debugging:

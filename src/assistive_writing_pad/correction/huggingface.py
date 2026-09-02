@@ -78,6 +78,9 @@ class HFSeq2SeqCorrectionRunner:
     _torch: object = field(default=None, init=False, repr=False)
     _device: str = field(default="cpu", init=False, repr=False)
 
+    def warm_up(self) -> None:
+        self.generate("The child is writing.")
+
     def generate(self, text: str) -> Sequence[GeneratedCorrection]:
         self._ensure_loaded()
         if self._tokenizer is None or self._model is None or self._torch is None:
@@ -273,6 +276,12 @@ class HuggingFaceCorrectionPipeline:
             min_generation_confidence=settings.hf_correction_min_confidence,
             max_change_ratio=settings.hf_correction_max_change_ratio,
         )
+
+    def warm_up(self) -> None:
+        for runner in self._active_runners():
+            warm_up = getattr(runner, "warm_up", None)
+            if callable(warm_up):
+                warm_up()
 
     def correct(self, text: str) -> CorrectionResult:
         if not text.strip():

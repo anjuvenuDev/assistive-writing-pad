@@ -1,7 +1,7 @@
 import pytest
 
 from assistive_writing_pad.config.settings import RuntimeSettings
-from assistive_writing_pad.contracts import RecognitionResult
+from assistive_writing_pad.contracts import CorrectionResult, RecognitionResult
 from assistive_writing_pad.correction.contextual import ContextualCorrector
 from assistive_writing_pad.display.web_app import HTML, RecognitionService, stroke_groups_from_payload
 
@@ -14,6 +14,17 @@ class StubStrokeGroupRecognizer:
             confidence=0.92,
             metadata={"recognizer": "stub", "mode": mode, "top3": "[]"},
         )
+
+
+class WarmableCorrector:
+    def __init__(self) -> None:
+        self.warm_up_count = 0
+
+    def warm_up(self) -> None:
+        self.warm_up_count += 1
+
+    def correct(self, text: str) -> CorrectionResult:
+        return CorrectionResult(original_text=text, corrected_text=text)
 
 
 def test_stroke_groups_from_payload_parses_strokes() -> None:
@@ -111,3 +122,19 @@ def test_browser_ui_keeps_child_facing_controls_simple() -> None:
     assert 'id="clearText"' not in HTML
     assert "scripts/setup_model_env.sh" not in HTML
     assert "Pointer diagnostics" not in HTML
+
+
+def test_recognition_service_warms_correction_models() -> None:
+    corrector = WarmableCorrector()
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=corrector,
+        settings=RuntimeSettings(
+            preload_ocr_model=False,
+            preload_correction_models=True,
+        ),
+    )
+
+    service._warm_up_correction_models()
+
+    assert corrector.warm_up_count == 1

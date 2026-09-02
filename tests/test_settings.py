@@ -50,3 +50,24 @@ def test_runtime_settings_disable_ocr_preload_on_raspberry_pi(monkeypatch) -> No
     monkeypatch.delenv("AWP_PRELOAD_OCR_MODEL", raising=False)
 
     assert RuntimeSettings.from_env().preload_ocr_model is False
+
+
+def test_runtime_settings_preload_correction_models_by_laptop_default(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_DEVICE_PROFILE", "laptop")
+    monkeypatch.delenv("AWP_PRELOAD_CORRECTION_MODELS", raising=False)
+
+    assert RuntimeSettings.from_env().preload_correction_models is True
+
+
+def test_runtime_settings_disable_correction_preload_on_raspberry_pi(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_DEVICE_PROFILE", "raspberry_pi")
+    monkeypatch.delenv("AWP_PRELOAD_CORRECTION_MODELS", raising=False)
+
+    assert RuntimeSettings.from_env().preload_correction_models is False
+
+
+def test_runtime_settings_allow_correction_preload_override(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_DEVICE_PROFILE", "raspberry_pi")
+    monkeypatch.setenv("AWP_PRELOAD_CORRECTION_MODELS", "1")
+
+    assert RuntimeSettings.from_env().preload_correction_models is True

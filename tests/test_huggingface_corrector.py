@@ -37,6 +37,21 @@ class BrokenRunner:
         raise ModelCorrectionUnavailable("missing cached model")
 
 
+class WarmableRunner(FakeRunner):
+    def __init__(
+        self,
+        stage: str,
+        outputs: Dict[str, Sequence[GeneratedCorrection]],
+        warm_log: list[str],
+        model_name: str = "fake-model",
+    ) -> None:
+        super().__init__(stage=stage, outputs=outputs, model_name=model_name)
+        self.warm_log = warm_log
+
+    def warm_up(self) -> None:
+        self.warm_log.append(self.stage)
+
+
 def generated(text: str, confidence: float, stage: str, model: str = "fake-model") -> GeneratedCorrection:
     return GeneratedCorrection(text=text, confidence=confidence, model_name=model, stage=stage)
 
@@ -151,6 +166,21 @@ def test_huggingface_pipeline_reports_model_errors_without_fake_corrections() ->
     assert result.corrected_text == "teh cat"
     assert result.corrections == ()
     assert json.loads(result.metadata["errors"])[0]["model"] == "broken-model"
+
+
+def test_huggingface_pipeline_warms_active_runners_in_stage_order() -> None:
+    warm_log: list[str] = []
+    spelling = WarmableRunner("spelling", {}, warm_log)
+    semantic = WarmableRunner("semantic", {}, warm_log)
+    grammar = WarmableRunner("grammar", {}, warm_log)
+
+    HuggingFaceCorrectionPipeline(
+        spelling_runner=spelling,
+        semantic_runner=semantic,
+        grammar_runner=grammar,
+    ).warm_up()
+
+    assert warm_log == ["spelling", "semantic", "grammar"]
 
 
 def test_model_output_guard_rejects_unrelated_long_text() -> None:

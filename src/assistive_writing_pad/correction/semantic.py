@@ -56,6 +56,15 @@ class HFMaskedLMSemanticScorer:
     _torch: object = field(default=None, init=False, repr=False)
     _device: str = field(default="cpu", init=False, repr=False)
 
+    def warm_up(self) -> None:
+        self._ensure_loaded()
+        tokenizer = self._tokenizer
+        mask_token = getattr(tokenizer, "mask_token", "[MASK]")
+        self.score_candidates(
+            f"I can {mask_token} the word.",
+            ("write", "right"),
+        )
+
     def score_candidates(self, masked_text: str, candidates: Sequence[str]) -> Mapping[str, float]:
         self._ensure_loaded()
         if self._tokenizer is None or self._model is None or self._torch is None:
@@ -139,6 +148,12 @@ class SemanticCorrectionRunner:
     local_files_only: bool = False
     device: str = "auto"
     max_input_tokens: int = 128
+
+    def warm_up(self) -> None:
+        scorer = self._get_scorer()
+        warm_up = getattr(scorer, "warm_up", None)
+        if callable(warm_up):
+            warm_up()
 
     def generate(self, text: str) -> Sequence[GeneratedCorrection]:
         tokens = TOKEN_RE.findall(text)
