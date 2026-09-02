@@ -24,12 +24,16 @@ def test_runtime_settings_use_huggingface_correction_by_default(monkeypatch) -> 
 
 
 def test_runtime_settings_read_huggingface_correction_flags(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_HF_SEMANTIC_MODEL", "distilbert/distilbert-base-uncased")
+    monkeypatch.setenv("AWP_HF_SEMANTIC_MIN_RATIO", "2.0")
     monkeypatch.setenv("AWP_HF_GRAMMAR_MODEL", "pszemraj/flan-t5-large-grammar-synthesis")
     monkeypatch.setenv("AWP_HF_CORRECTION_LOCAL_FILES_ONLY", "1")
     monkeypatch.setenv("AWP_HF_CORRECTION_CANDIDATES", "2")
 
     settings = RuntimeSettings.from_env()
 
+    assert settings.hf_semantic_model == "distilbert/distilbert-base-uncased"
+    assert settings.hf_semantic_min_ratio == 2.0
     assert settings.hf_grammar_model == "pszemraj/flan-t5-large-grammar-synthesis"
     assert settings.hf_correction_local_files_only is True
     assert settings.hf_correction_candidates == 2

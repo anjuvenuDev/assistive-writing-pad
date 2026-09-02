@@ -28,6 +28,11 @@ def main() -> int:
         default=None,
         help="Override grammar/GEC model ID.",
     )
+    parser.add_argument(
+        "--semantic-model",
+        default=None,
+        help="Override semantic masked-LM model ID.",
+    )
     args = parser.parse_args()
 
     settings = RuntimeSettings.from_env()
@@ -39,13 +44,16 @@ def main() -> int:
         args.grammar_model or settings.hf_grammar_model,
     ]
     for model_id in dict.fromkeys(model_ids):
-        cache_model(model_id, cache_dir)
+        cache_seq2seq_model(model_id, cache_dir)
+
+    semantic_model = args.semantic_model or settings.hf_semantic_model
+    cache_masked_lm_model(semantic_model, cache_dir)
 
     print(f"Cached correction models in {cache_dir}")
     return 0
 
 
-def cache_model(model_id: str, cache_dir: Path) -> None:
+def cache_seq2seq_model(model_id: str, cache_dir: Path) -> None:
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
     tokenizer_id = MODEL_TOKENIZERS.get(model_id, model_id)
@@ -54,6 +62,16 @@ def cache_model(model_id: str, cache_dir: Path) -> None:
 
     print(f"Downloading model: {model_id}")
     AutoModelForSeq2SeqLM.from_pretrained(model_id, cache_dir=str(cache_dir))
+
+
+def cache_masked_lm_model(model_id: str, cache_dir: Path) -> None:
+    from transformers import AutoModelForMaskedLM, AutoTokenizer
+
+    print(f"Downloading tokenizer: {model_id}")
+    AutoTokenizer.from_pretrained(model_id, cache_dir=str(cache_dir))
+
+    print(f"Downloading masked LM model: {model_id}")
+    AutoModelForMaskedLM.from_pretrained(model_id, cache_dir=str(cache_dir))
 
 
 if __name__ == "__main__":

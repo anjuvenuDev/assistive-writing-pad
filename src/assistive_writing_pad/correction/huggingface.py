@@ -210,9 +210,10 @@ class HFSeq2SeqCorrectionRunner:
 
 @dataclass
 class HuggingFaceCorrectionPipeline:
-    """Two-stage model pipeline: spelling correction followed by GEC."""
+    """Model pipeline: spelling, semantic real-word correction, then GEC."""
 
     spelling_runner: Optional[CorrectionModelRunner] = None
+    semantic_runner: Optional[CorrectionModelRunner] = None
     grammar_runner: Optional[CorrectionModelRunner] = None
     min_generation_confidence: float = 0.0
     max_change_ratio: float = 0.70
@@ -230,6 +231,7 @@ class HuggingFaceCorrectionPipeline:
             "max_new_tokens": settings.hf_correction_max_new_tokens,
         }
         spelling_runner: Optional[CorrectionModelRunner] = None
+        semantic_runner: Optional[CorrectionModelRunner] = None
         grammar_runner: Optional[CorrectionModelRunner] = None
 
         if settings.hf_spelling_model_enabled:
@@ -239,6 +241,20 @@ class HuggingFaceCorrectionPipeline:
                 prompt_template=prompt_for_model(settings.hf_spelling_model, "{text}"),
                 tokenizer_name=MODEL_TOKENIZERS.get(settings.hf_spelling_model),
                 **common_kwargs,
+            )
+
+        if settings.hf_semantic_model_enabled:
+            from assistive_writing_pad.correction.semantic import SemanticCorrectionRunner
+
+            semantic_runner = SemanticCorrectionRunner(
+                model_name=settings.hf_semantic_model,
+                cache_dir=cache_dir,
+                local_files_only=settings.hf_correction_local_files_only,
+                device=settings.hf_correction_device,
+                max_input_tokens=settings.hf_correction_max_input_tokens,
+                min_score=settings.hf_semantic_min_score,
+                min_margin=settings.hf_semantic_min_margin,
+                min_ratio=settings.hf_semantic_min_ratio,
             )
 
         if settings.hf_grammar_model_enabled:
@@ -252,6 +268,7 @@ class HuggingFaceCorrectionPipeline:
 
         return cls(
             spelling_runner=spelling_runner,
+            semantic_runner=semantic_runner,
             grammar_runner=grammar_runner,
             min_generation_confidence=settings.hf_correction_min_confidence,
             max_change_ratio=settings.hf_correction_max_change_ratio,
@@ -329,6 +346,8 @@ class HuggingFaceCorrectionPipeline:
         runners: List[CorrectionModelRunner] = []
         if self.spelling_runner is not None:
             runners.append(self.spelling_runner)
+        if self.semantic_runner is not None:
+            runners.append(self.semantic_runner)
         if self.grammar_runner is not None:
             runners.append(self.grammar_runner)
         return tuple(runners)
@@ -470,6 +489,8 @@ def reason_for_applied_stages(applied: Sequence[GeneratedCorrection]) -> str:
         return "hf_spelling_model"
     if stages == {"grammar"}:
         return "hf_grammar_model"
+    if stages == {"semantic"}:
+        return "hf_semantic_model"
     if stages:
         return "hf_model_pipeline"
     return "hf_model_pipeline"

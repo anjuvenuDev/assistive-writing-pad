@@ -26,6 +26,11 @@ class RuntimeSettings:
     correction_confidence_threshold: float = 0.70
     hf_spelling_model_enabled: bool = True
     hf_spelling_model: str = "oliverguhr/spelling-correction-english-base"
+    hf_semantic_model_enabled: bool = True
+    hf_semantic_model: str = "distilbert/distilbert-base-uncased"
+    hf_semantic_min_score: float = 0.01
+    hf_semantic_min_margin: float = 0.04
+    hf_semantic_min_ratio: float = 1.55
     hf_grammar_model_enabled: bool = True
     hf_grammar_model: str = "gotutiyan/gec-bart-base"
     hf_correction_local_files_only: bool = False
@@ -78,6 +83,27 @@ class RuntimeSettings:
                 cls.hf_spelling_model,
             ).strip()
             or cls.hf_spelling_model,
+            hf_semantic_model_enabled=_bool_env(
+                "AWP_HF_SEMANTIC_MODEL_ENABLED",
+                cls.hf_semantic_model_enabled,
+            ),
+            hf_semantic_model=os.environ.get(
+                "AWP_HF_SEMANTIC_MODEL",
+                cls.hf_semantic_model,
+            ).strip()
+            or cls.hf_semantic_model,
+            hf_semantic_min_score=_float_env(
+                "AWP_HF_SEMANTIC_MIN_SCORE",
+                cls.hf_semantic_min_score,
+            ),
+            hf_semantic_min_margin=_float_env(
+                "AWP_HF_SEMANTIC_MIN_MARGIN",
+                cls.hf_semantic_min_margin,
+            ),
+            hf_semantic_min_ratio=_float_env(
+                "AWP_HF_SEMANTIC_MIN_RATIO",
+                cls.hf_semantic_min_ratio,
+            ),
             hf_grammar_model_enabled=_bool_env(
                 "AWP_HF_GRAMMAR_MODEL_ENABLED",
                 cls.hf_grammar_model_enabled,
@@ -151,6 +177,12 @@ class RuntimeSettings:
             raise ValueError("hf_correction_min_confidence must be between 0 and 1")
         if not 0.0 <= self.hf_correction_max_change_ratio <= 1.0:
             raise ValueError("hf_correction_max_change_ratio must be between 0 and 1")
+        if not 0.0 <= self.hf_semantic_min_score <= 1.0:
+            raise ValueError("hf_semantic_min_score must be between 0 and 1")
+        if not 0.0 <= self.hf_semantic_min_margin <= 1.0:
+            raise ValueError("hf_semantic_min_margin must be between 0 and 1")
+        if self.hf_semantic_min_ratio <= 0.0:
+            raise ValueError("hf_semantic_min_ratio must be positive")
 
 
 def _bool_env(name: str, default: bool) -> bool:

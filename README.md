@@ -23,8 +23,8 @@ What has been done so far:
 - Legacy rule/contextual correction layers for deterministic debugging
 - A Tkinter handwriting app and a browser-based web UI for writing, recognition, and basic text actions
 - Pretrained handwritten OCR support through TrOCR, with lazy loading and local cache usage
-- Real-time correction after recognition, using a model-backed Hugging Face
-  spelling stage followed by a grammatical-error-correction stage
+- Real-time correction after recognition, using separate model-backed Hugging
+  Face spelling, semantic real-word, and grammatical-error-correction stages
 - Tests covering capture, preprocessing, template recognition, TrOCR rendering, web payload parsing, and pipeline behavior
 
 The next major gaps are real handwriting accuracy benchmarking, broader sentence-level
@@ -133,6 +133,7 @@ inference:
 The default realtime path uses a Hugging Face model pipeline:
 
 - spelling/typo correction with `oliverguhr/spelling-correction-english-base`
+- semantic real-word correction with `distilbert/distilbert-base-uncased`
 - grammatical-error correction with `gotutiyan/gec-bart-base`
 - beam-search alternatives returned in correction metadata for review and
   future "try next match" UI flows
@@ -145,6 +146,7 @@ Useful runtime flags:
 AWP_DEVICE_PROFILE=laptop
 AWP_CORRECTION_MODE=hf
 AWP_HF_SPELLING_MODEL=oliverguhr/spelling-correction-english-base
+AWP_HF_SEMANTIC_MODEL=distilbert/distilbert-base-uncased
 AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
 AWP_HF_CORRECTION_CANDIDATES=3
 AWP_HF_CORRECTION_NUM_BEAMS=4
@@ -174,6 +176,7 @@ model cache:
 AWP_DEVICE_PROFILE=raspberry_pi
 AWP_TROCR_MODEL=microsoft/trocr-small-handwritten
 AWP_CORRECTION_MODE=hf
+AWP_HF_SEMANTIC_MODEL=distilbert/distilbert-base-uncased
 AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1
 AWP_PRELOAD_OCR_MODEL=0

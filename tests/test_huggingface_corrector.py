@@ -99,6 +99,31 @@ def test_huggingface_pipeline_preserves_clean_text_when_models_agree() -> None:
     assert result.confidence == 1.0
 
 
+def test_huggingface_pipeline_applies_semantic_stage_between_models() -> None:
+    semantic = FakeRunner(
+        stage="semantic",
+        model_name="semantic-model",
+        outputs={
+            "I can here the bell.": [
+                generated("I can hear the bell.", 0.82, "semantic", "semantic-model")
+            ]
+        },
+    )
+    grammar = FakeRunner(stage="grammar", outputs={})
+
+    result = HuggingFaceCorrectionPipeline(
+        semantic_runner=semantic,
+        grammar_runner=grammar,
+    ).correct("I can here the bell.")
+
+    assert result.corrected_text == "I can hear the bell."
+    assert result.corrections[0].reason == "hf_semantic_model"
+    assert [item["stage"] for item in json.loads(result.metadata["stages"])] == [
+        "semantic",
+        "grammar",
+    ]
+
+
 def test_huggingface_pipeline_rejects_hallucinated_generation() -> None:
     spelling = FakeRunner(
         stage="spelling",
