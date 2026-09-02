@@ -9,13 +9,14 @@ from typing import List
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 import torch
 
 from assistive_writing_pad.contracts import StrokePoint
 from assistive_writing_pad.recognition.emnist import (
+    _CACHE_DIR,
     EMNIST_LABELS,
     EMNISTCharacterRecognizer,
+    _auto_download_enabled,
     _pixel_classify,
 )
 
@@ -87,6 +88,12 @@ class TestEMNISTCharacterRecognizerInit:
     def test_pipeline_not_loaded_at_init(self) -> None:
         rec = EMNISTCharacterRecognizer()
         assert rec._pipeline is None
+
+    def test_pytest_uses_project_local_cache(self) -> None:
+        assert str(_CACHE_DIR).replace("\\", "/").startswith("models/cache/emnist")
+
+    def test_pytest_disables_auto_download(self) -> None:
+        assert _auto_download_enabled() is False
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +242,15 @@ class TestEMNISTLazyLoading:
         rec.recognize(_make_stroke())
         # _load_model should not be called at all since _pipeline is already True
         assert load_count["n"] == 0
+
+    @patch("assistive_writing_pad.recognition.emnist.urllib.request.urlretrieve")
+    def test_download_failure_falls_back_without_crashing(self, mock_urlretrieve, tmp_path) -> None:
+        mock_urlretrieve.side_effect = OSError("offline")
+
+        weights_path = tmp_path / "cache" / "weights.pt"
+
+        assert EMNISTCharacterRecognizer._download_weights(weights_path) is False
+        assert not weights_path.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Assistive Writing Pad Project Skill Log
 
-Last updated: 2026-06-18
+Last updated: 2026-09-02
 
 ## Project Goal
 
@@ -56,6 +56,16 @@ Build a real-time handwriting recognition and intelligent correction system for 
   - Installed Transformers, protobuf, and SentencePiece for TrOCR.
   - Loaded `microsoft/trocr-small-handwritten` successfully into the local Hugging Face cache.
   - Ran one adapter-level inference call with simulated strokes; the adapter returned text and confidence.
+  - Completed a Step 1 stability pass for the current module-by-module rebuild.
+  - Moved EMNIST defaults to a project-local cache path under `models/cache/emnist`.
+  - Added explicit EMNIST auto-download control through `AWP_EMNIST_AUTO_DOWNLOAD`.
+  - Made EMNIST failed downloads fall back without crashing on read-only cache paths.
+  - Removed unconditional EMNIST stdout banners and gated EMNIST debug image output.
+  - Gated preprocessing stage image dumps behind `AWP_DEBUG_PREPROCESSING=1`.
+  - Disabled EMNIST auto-download during pytest through `tests/conftest.py`.
+  - Merged duplicate confusion-map entries so case-pair candidates are not overwritten.
+  - Verified `.venv/bin/python -m ruff check src tests` passes.
+  - Verified `.venv/bin/python -m pytest` passes with 121 tests.
 - Not yet implemented:
   - High-accuracy handwriting recognition model training
   - Full spelling/grammar/semantic correction models
@@ -194,6 +204,15 @@ Phase 4B:
   - TrOCR performance on Raspberry Pi 4 is unknown and likely needs quantization or replacement with a smaller model.
   - Generic PyPI `torch` pulls CUDA dependencies on this machine, so CPU-only PyTorch must be installed from the PyTorch CPU wheel index.
   - Recognition is line-aware now, but word-level segmentation and post-correction remain future work.
+
+2026-09-02 stability baseline:
+
+- Before changes: `.venv/bin/python -m pytest` reported 116 passed and 2 failed because
+  EMNIST attempted a network download and then crashed cleaning a read-only home cache path.
+- After changes: `.venv/bin/python -m pytest` reported 121 passed.
+- Lint: `.venv/bin/python -m ruff check src tests` passed.
+- No recognition accuracy claim was made in this step; this was a reliability baseline
+  before recognition, correction, and UI accuracy work.
 
 Planned metrics:
 

@@ -5,8 +5,6 @@ Tests are fast, CPU-only, and do not require model dependencies.
 
 from __future__ import annotations
 
-import pytest
-
 from assistive_writing_pad.recognition.confusion import (
     CONFUSION_MAP,
     ALPHANUM_CHARSET,

@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-import pytest
-
 from assistive_writing_pad.preprocessing.ocr_image_ops import (
     auto_crop_handwriting,
     enhance_for_ocr,

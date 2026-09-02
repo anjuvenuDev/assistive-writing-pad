@@ -95,6 +95,24 @@ that, the UI runs it from the local cache.
 For best compatibility with PyTorch, use Python 3.9-3.11 for the model
 environment.
 
+Model and diagnostic artifacts default to project-local paths so laptop and
+Raspberry Pi setup can be copied or backed up predictably:
+
+- Generic model cache root: `models/cache`
+- EMNIST character-model cache: `models/cache/emnist`
+- Override cache root with `AWP_MODEL_CACHE`
+- Override EMNIST cache with `AWP_EMNIST_CACHE_DIR`
+- Disable EMNIST first-use download with `AWP_EMNIST_AUTO_DOWNLOAD=0`
+
+Verbose image dumps are off by default because they slow down real-time use.
+Enable them only while debugging:
+
+```bash
+AWP_DEBUG_OCR=1
+AWP_DEBUG_EMNIST=1
+AWP_DEBUG_PREPROCESSING=1
+```
+
 ## Real-Time Correction
 
 Recognition responses now continue through the correction pipeline before the

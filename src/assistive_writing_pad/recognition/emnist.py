@@ -1,7 +1,8 @@
 """EMNIST-based single-character classifier.
 
 Uses a lightweight CNN built directly with PyTorch (no torchvision required).
-Weights are fetched from a public release on first use and cached locally.
+Weights are loaded from a project-local cache by default. They can be fetched
+from a public release on first use when auto-download is enabled.
 
 The classifier is trained on EMNIST ByClass (62 classes: 0-9, A-Z, a-z).
 The model architecture is a simple 2-block CNN that runs in ~5 ms on CPU.
@@ -26,7 +27,7 @@ import logging
 import os
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
@@ -46,7 +47,8 @@ EMNIST_LABELS: List[str] = _DIGITS + _UPPER   # 10 + 52 = 62 classes
 # ---------------------------------------------------------------------------
 # Cache directory for model weights
 # ---------------------------------------------------------------------------
-_CACHE_DIR = Path(os.environ.get("AWP_MODEL_CACHE", Path.home() / ".cache" / "awp" / "emnist"))
+_DEFAULT_MODEL_CACHE_ROOT = Path(os.environ.get("AWP_MODEL_CACHE", str(Path("models") / "cache")))
+_CACHE_DIR = Path(os.environ.get("AWP_EMNIST_CACHE_DIR", str(_DEFAULT_MODEL_CACHE_ROOT / "emnist")))
 
 # Public release URL for a pre-trained emnist-byclass small CNN checkpoint.
 # This is a self-contained 1.6 MB .pt file (state_dict, CPU float32).
@@ -56,6 +58,21 @@ _WEIGHTS_URL  = (
 )
 _WEIGHTS_SHA256 = ""   # Set to non-empty to enable integrity check.
 _WEIGHTS_FILENAME = "emnist_byclass_cnn_v1.pt"
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _auto_download_enabled() -> bool:
+    return _bool_env("AWP_EMNIST_AUTO_DOWNLOAD", True)
+
+
+def _debug_emnist_enabled() -> bool:
+    return _bool_env("AWP_DEBUG_EMNIST", _bool_env("AWP_DEBUG_OCR", False))
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +88,6 @@ def _build_cnn(num_classes: int = 62):
       Linear(64*7*7=3136 -> 256) -> ReLU -> Dropout(0.5)
       Linear(256 -> num_classes)
     """
-    import torch
     import torch.nn as nn
 
     class _CNN(nn.Module):
@@ -169,10 +185,11 @@ class EMNISTCharacterRecognizer:
         preprocessed = self._preprocessor.preprocess(strokes)
         img28 = preprocessed.image  # shape (28, 28)
 
-        # ── Mode banner ───────────────────────────────────────────────────────
         if self._use_fallback or self._model is None:
-            print("\nEMNIST MODE: HEURISTIC")
-            print(f"  reason : weights not loaded (use_fallback={self._use_fallback}, model={self._model is not None})")
+            logger.info(
+                "EMNIST using heuristic fallback (weights_loaded=%s)",
+                self._model is not None,
+            )
             candidates = _pixel_classify(img28)
             top = candidates[0]
             return RecognitionResult(
@@ -184,9 +201,7 @@ class EMNISTCharacterRecognizer:
                 metadata={"recognizer": "emnist", "model": "heuristic_fallback"},
             )
 
-        print("\nEMNIST MODE: CNN")
-        print(f"  model : {self.model_name}")
-        print(f"  path  : {_CACHE_DIR / _WEIGHTS_FILENAME}")
+        logger.info("EMNIST using CNN model=%s path=%s", self.model_name, _CACHE_DIR / _WEIGHTS_FILENAME)
         return self._run_cnn(img28)
 
     # ------------------------------------------------------------------
@@ -206,23 +221,20 @@ class EMNISTCharacterRecognizer:
 
         weights_path = _CACHE_DIR / _WEIGHTS_FILENAME
 
-        # ── Diagnostic header ────────────────────────────────────────────────
-        print("\n" + "-" * 60)
-        print("EMNIST MODEL LOAD")
-        print(f"  weights file : {_WEIGHTS_FILENAME}")
-        print(f"  full path    : {weights_path}")
-        print(f"  file exists  : {weights_path.exists()}")
-        print("-" * 60)
-        # ─────────────────────────────────────────────────────────────────────
-
         if not weights_path.exists():
-            logger.info("EMNIST weights not found locally; attempting download …")
+            if not _auto_download_enabled():
+                self._use_fallback = True
+                logger.warning(
+                    "EMNIST weights not found at %s and auto-download is disabled; "
+                    "using heuristic fallback",
+                    weights_path,
+                )
+                return None
+
+            logger.info("EMNIST weights not found at %s; attempting download", weights_path)
             ok = self._download_weights(weights_path)
             if not ok:
                 self._use_fallback = True
-                print("  load status  : FAILED (download failed)")
-                print("  active mode  : HEURISTIC (pixel fallback)")
-                print("-" * 60 + "\n")
                 logger.warning(
                     "EMNIST weight download failed. "
                     "Character mode will use the pixel-heuristic fallback."
@@ -234,36 +246,38 @@ class EMNISTCharacterRecognizer:
             state = torch.load(str(weights_path), map_location="cpu", weights_only=True)
             model.load_state_dict(state)
             model.eval()
-            print(f"  load status  : OK")
-            print(f"  active mode  : CNN")
-            print("-" * 60 + "\n")
             logger.info("EMNIST CNN loaded from %s", weights_path)
             return model
         except Exception as exc:
             self._use_fallback = True
-            print(f"  load status  : FAILED ({exc})")
-            print(f"  active mode  : HEURISTIC (pixel fallback)")
-            print("-" * 60 + "\n")
             logger.error("Failed to load EMNIST CNN weights: %s", exc)
             return None
 
     @staticmethod
     def _download_weights(dest: Path) -> bool:
-        dest.parent.mkdir(parents=True, exist_ok=True)
         try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
             logger.info("Downloading EMNIST weights from %s", _WEIGHTS_URL)
             urllib.request.urlretrieve(_WEIGHTS_URL, str(dest))
             if _WEIGHTS_SHA256:
                 sha = hashlib.sha256(dest.read_bytes()).hexdigest()
                 if sha != _WEIGHTS_SHA256:
                     logger.error("Checksum mismatch for EMNIST weights (got %s)", sha)
-                    dest.unlink(missing_ok=True)
+                    EMNISTCharacterRecognizer._safe_unlink(dest)
                     return False
             return True
         except Exception as exc:
             logger.warning("EMNIST weight download failed: %s", exc)
-            dest.unlink(missing_ok=True)
+            EMNISTCharacterRecognizer._safe_unlink(dest)
             return False
+
+    @staticmethod
+    def _safe_unlink(path: Path) -> None:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError as exc:
+            logger.debug("Could not remove partial EMNIST download %s: %s", path, exc)
 
     def _run_cnn(self, img28: np.ndarray) -> RecognitionResult:
         """Run forward pass through the CNN, then apply confusion-aware merge."""
@@ -272,13 +286,8 @@ class EMNISTCharacterRecognizer:
 
         # img28: (28, 28) float32, ink=1 bg=0
         # EMNIST training convention: white ink on black background (same as our preprocessor)
-        try:
-            debug_dir = Path("data/debug")
-            debug_dir.mkdir(parents=True, exist_ok=True)
-            img_uint8 = (img28 * 255.0).clip(0, 255).astype(np.uint8)
-            Image.fromarray(img_uint8).save(debug_dir / "emnist_input.png")
-        except Exception as exc:
-            logger.warning("Failed to save debug image: %s", exc)
+        if _debug_emnist_enabled():
+            self._save_debug_input(img28)
 
         tensor = torch.from_numpy(img28).unsqueeze(0).unsqueeze(0).float()  # (1, 1, 28, 28)
 
@@ -322,6 +331,16 @@ class EMNISTCharacterRecognizer:
             character_confidences=char_confs,
             metadata={"recognizer": "emnist", "model": self.model_name},
         )
+
+    @staticmethod
+    def _save_debug_input(img28: np.ndarray) -> None:
+        try:
+            debug_dir = Path("data/debug")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            img_uint8 = (img28 * 255.0).clip(0, 255).astype(np.uint8)
+            Image.fromarray(img_uint8).save(debug_dir / "emnist_input.png")
+        except Exception as exc:
+            logger.warning("Failed to save EMNIST debug image: %s", exc)
 
 
 # ---------------------------------------------------------------------------

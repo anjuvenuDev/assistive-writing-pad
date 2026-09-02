@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence, Tuple
@@ -10,15 +11,15 @@ from typing import Sequence, Tuple
 import numpy as np
 
 from assistive_writing_pad.contracts import StrokePoint
-from assistive_writing_pad.preprocessing.image_ops import (
-    crop_to_content,
-    normalize_unit,
-    pad_to_square,
-    resize_nearest,
-)
+from assistive_writing_pad.preprocessing.image_ops import normalize_unit, pad_to_square
 from assistive_writing_pad.preprocessing.rasterize import RasterizerConfig, rasterize_strokes
 
 logger = logging.getLogger("assistive_writing_pad.preprocessing.pipeline")
+
+
+def _debug_preprocessing_enabled() -> bool:
+    raw = os.environ.get("AWP_DEBUG_PREPROCESSING", "0")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -49,13 +50,11 @@ class StrokePreprocessor:
         return float(y_com), float(x_com)
 
     def preprocess(self, points: Sequence[StrokePoint]) -> PreprocessedImage:
-        import time
         import cv2
-        from PIL import Image, ImageFilter
+        from PIL import Image
 
-        ts = int(time.time() * 1000)
-        debug_dir = Path("data/debug/stages")
-        debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_enabled = _debug_preprocessing_enabled()
+        stages_data = []  # List of tuples: (name, img, stats)
 
         # Helper to compute stats for a stage
         def get_stage_stats(img: np.ndarray) -> dict:
@@ -69,7 +68,7 @@ class StrokePreprocessor:
             else:
                 bbox = None
                 aspect_ratio = 1.0
-            
+
             y_com, x_com = self._com(img)
             return {
                 "width": w,
@@ -80,20 +79,22 @@ class StrokePreprocessor:
                 "com": (float(x_com), float(y_com))
             }
 
-        stages_data = []  # List of tuples: (name, img, stats)
+        def add_debug_stage(name: str, img: np.ndarray) -> None:
+            if debug_enabled:
+                stages_data.append((name, img, get_stage_stats(img)))
 
         # 0. Stage 00: Canvas
         raster = rasterize_strokes(points, self.config.rasterizer)
-        stages_data.append(("00_canvas", raster, get_stage_stats(raster)))
+        add_debug_stage("00_canvas", raster)
 
         # 1. Stage 01: Binary
         binary = (raster > 0.05).astype(np.float32)
-        stages_data.append(("01_binary", binary, get_stage_stats(binary)))
+        add_debug_stage("01_binary", binary)
 
         # 2. Stage 02: Blurred
         # Apply a mild Gaussian blur
         blurred = cv2.GaussianBlur(binary, (3, 3), 0)
-        stages_data.append(("02_blurred", blurred, get_stage_stats(blurred)))
+        add_debug_stage("02_blurred", blurred)
 
         # 3. Stage 03: Bounding Box (Cropped)
         rows, cols = np.where(blurred > 0.05)
@@ -104,15 +105,15 @@ class StrokePreprocessor:
             min_r, max_r = rows.min(), rows.max()
             min_c, max_c = cols.min(), cols.max()
             cropped = blurred[min_r : max_r + 1, min_c : max_c + 1].copy()
-        stages_data.append(("03_bounding_box", cropped, get_stage_stats(cropped)))
+        add_debug_stage("03_bounding_box", cropped)
 
         # 4. Stage 04: Square Canvas
         squared = pad_to_square(cropped)
-        stages_data.append(("04_square_canvas", squared, get_stage_stats(squared)))
+        add_debug_stage("04_square_canvas", squared)
 
         # 5. Stage 05: Before Resize
         before_resize = squared.copy()
-        stages_data.append(("05_before_resize", before_resize, get_stage_stats(before_resize)))
+        add_debug_stage("05_before_resize", before_resize)
 
         # 6. Stage 06: After Resize
         h_s, w_s = before_resize.shape
@@ -128,7 +129,7 @@ class StrokePreprocessor:
         pil_cropped = Image.fromarray(before_resize)
         pil_resized = pil_cropped.resize((w_new, h_new), Image.Resampling.BILINEAR)
         resized_20 = np.array(pil_resized).astype(np.float32)
-        stages_data.append(("06_after_resize", resized_20, get_stage_stats(resized_20)))
+        add_debug_stage("06_after_resize", resized_20)
 
         # 7. Stage 07: After Centering
         canvas_28 = np.zeros((28, 28), dtype=np.float32)
@@ -155,55 +156,70 @@ class StrokePreprocessor:
         crop_x_end = crop_x_start + (x_end - x_start)
 
         canvas_28[y_start:y_end, x_start:x_end] = resized_20[crop_y_start:crop_y_end, crop_x_start:crop_x_end]
-        stages_data.append(("07_after_centering", canvas_28, get_stage_stats(canvas_28)))
+        add_debug_stage("07_after_centering", canvas_28)
 
         # 8. Stage 08: After Rotation
         normalized = normalize_unit(canvas_28)
         rotated = np.rot90(normalized, k=2).copy()
-        stages_data.append(("08_after_rotation", rotated, get_stage_stats(rotated)))
+        add_debug_stage("08_after_rotation", rotated)
 
         # 9. Stage 09: Final Tensor
         final_tensor = rotated.copy()
-        stages_data.append(("09_final_tensor", final_tensor, get_stage_stats(final_tensor)))
+        add_debug_stage("09_final_tensor", final_tensor)
 
-        # Save images and print stats
-        logger.info(f"\n================ PREPROCESSING DEBUG RUN: {ts} ================")
-        for idx in range(len(stages_data)):
-            name, img, stats = stages_data[idx]
+        if debug_enabled:
+            import time
 
-            # Save stage image (Do NOT overwrite)
-            filename = f"{name}_{ts}.png"
-            Image.fromarray((img * 255.0).clip(0, 255).astype(np.uint8)).save(debug_dir / filename)
+            debug_dir = Path("data/debug/stages")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = int(time.time() * 1000)
+            logger.info("Preprocessing debug run: %s", ts)
+            for idx in range(len(stages_data)):
+                name, img, stats = stages_data[idx]
 
-            # Compute MSE with next stage
-            mse_str = "N/A"
-            if idx < len(stages_data) - 1:
-                next_img = stages_data[idx+1][1]
-                if img.shape != next_img.shape:
-                    img_resized = cv2.resize(img, (next_img.shape[1], next_img.shape[0]), interpolation=cv2.INTER_LINEAR)
-                else:
-                    img_resized = img
-                mse = float(((img_resized - next_img) ** 2).mean())
-                mse_str = f"{mse:.6f}"
+                filename = f"{name}_{ts}.png"
+                Image.fromarray((img * 255.0).clip(0, 255).astype(np.uint8)).save(
+                    debug_dir / filename
+                )
 
-            logger.info(f"Stage {idx:02d}: {name}")
-            logger.info(f"  Width x Height      : {stats['width']}x{stats['height']}")
-            logger.info(f"  Foreground Pixels   : {stats['fg_count']}")
-            logger.info(f"  Bounding Box        : {stats['bbox']}")
-            logger.info(f"  Aspect Ratio        : {stats['aspect_ratio']:.4f}")
-            logger.info(f"  Center of Mass      : ({stats['com'][0]:.2f}, {stats['com'][1]:.2f})")
-            logger.info(f"  MSE (this -> next)  : {mse_str}")
+                mse_str = "N/A"
+                if idx < len(stages_data) - 1:
+                    next_img = stages_data[idx + 1][1]
+                    if img.shape != next_img.shape:
+                        img_resized = cv2.resize(
+                            img,
+                            (next_img.shape[1], next_img.shape[0]),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                    else:
+                        img_resized = img
+                    mse = float(((img_resized - next_img) ** 2).mean())
+                    mse_str = f"{mse:.6f}"
 
-            # Highlight dramatic structural changes
-            if idx < len(stages_data) - 1:
-                next_stats = stages_data[idx+1][2]
-                fg_ratio = next_stats['fg_count'] / max(stats['fg_count'], 1)
-                ar_diff = abs(next_stats['aspect_ratio'] - stats['aspect_ratio'])
-                if fg_ratio < 0.1 and stats['fg_count'] > 10:
-                    logger.info(f"  ⚠️ DETECTED CORRUPTION: Dramatic reduction in foreground pixels in next stage! (Ratio: {fg_ratio:.4f})")
-                if ar_diff > 0.5:
-                    logger.info(f"  ⚠️ DETECTED CORRUPTION: Dramatic change in aspect ratio in next stage! (Diff: {ar_diff:.4f})")
-        logger.info("================================================================\n")
+                logger.info("Stage %02d: %s", idx, name)
+                logger.info("  Width x Height      : %sx%s", stats["width"], stats["height"])
+                logger.info("  Foreground Pixels   : %s", stats["fg_count"])
+                logger.info("  Bounding Box        : %s", stats["bbox"])
+                logger.info("  Aspect Ratio        : %.4f", stats["aspect_ratio"])
+                logger.info("  Center of Mass      : (%.2f, %.2f)", stats["com"][0], stats["com"][1])
+                logger.info("  MSE (this -> next)  : %s", mse_str)
+
+                if idx < len(stages_data) - 1:
+                    next_stats = stages_data[idx + 1][2]
+                    fg_ratio = next_stats["fg_count"] / max(stats["fg_count"], 1)
+                    ar_diff = abs(next_stats["aspect_ratio"] - stats["aspect_ratio"])
+                    if fg_ratio < 0.1 and stats["fg_count"] > 10:
+                        logger.info(
+                            "  Debug warning: foreground pixels dropped sharply in next stage "
+                            "(ratio %.4f)",
+                            fg_ratio,
+                        )
+                    if ar_diff > 0.5:
+                        logger.info(
+                            "  Debug warning: aspect ratio changed sharply in next stage "
+                            "(diff %.4f)",
+                            ar_diff,
+                        )
 
         return PreprocessedImage(
             image=final_tensor.astype(np.float32),

@@ -55,20 +55,20 @@ _SEED_CONFUSION: Dict[str, Set[str]] = {
     # Four / l / h
     "4": {"l", "h", "9"},
     # r / m / n -- arch-top confusions
-    "r": {"m", "n", "h"},
+    "r": {"R", "m", "n", "h"},
     "m": {"r", "n"},
     "n": {"r", "m"},
     # h / r / t -- stem-and-arch
     "h": {"r", "t", "n"},
     "t": {"h", "r", "f"},
     # p / f
-    "p": {"f", "b"},
-    "f": {"p", "t"},
+    "p": {"P", "f", "b"},
+    "f": {"F", "p", "t"},
     # w / u -- open-cup shapes
     "w": {"u", "n"},
-    "u": {"w", "n", "v"},
+    "u": {"U", "w", "n", "v"},
     # v / u
-    "v": {"u", "w"},
+    "v": {"V", "u", "w"},
     # B / 8 / 6
     "B": {"8", "6"},
     "8": {"B", "6", "0"},
@@ -94,22 +94,17 @@ _SEED_CONFUSION: Dict[str, Set[str]] = {
     # lowercase with uppercase for visually similar glyphs).
     # These ensure the opposite-case variant always appears in the top-5.
     # ---------------------------------------------------------------------------
-    "f": {"F", "p", "t"},
     "F": {"f", "E"},
-    "u": {"U", "w", "n", "v"},
     "U": {"u", "V"},
-    "p": {"P", "f", "b"},
     "P": {"p", "F", "R"},
     "k": {"K", "x"},
     "K": {"k", "X"},
-    "v": {"V", "u", "w"},
     "V": {"v", "U"},
     "x": {"X", "k"},
     "X": {"x", "K"},
     "L": {"l", "1"},
     "e": {"E", "c"},
     "E": {"e", "F"},
-    "r": {"R", "m", "n", "h"},
     "R": {"r", "P"},
 }
 

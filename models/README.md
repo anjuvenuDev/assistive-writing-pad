@@ -13,6 +13,8 @@ Current model-backed paths:
   `microsoft/trocr-small-handwritten`
 - Optional contextual correction reranker:
   `distilbert/distilbert-base-uncased`
+- Local model cache root: `models/cache` by default, ignored by Git.
+- EMNIST character-model cache: `models/cache/emnist` by default.
 
 Keep correction model loading disabled unless a local benchmark proves the model
 meets the word and sentence latency budgets. This is mandatory for Raspberry Pi

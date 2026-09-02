@@ -1,7 +1,7 @@
 """Shared data contracts and component protocols."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import Dict, Optional, Protocol, Sequence, Tuple
 
 
 @dataclass(frozen=True)
