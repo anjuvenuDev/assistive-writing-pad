@@ -1,0 +1,12 @@
+{"id":"mixed_001","category":"mixed","input":"teh chlid writng","expected":"The child is writing.","notes":"OCR-like spelling errors plus missing auxiliary verb"}
+{"id":"semantic_001","category":"semantic","input":"I went too school.","expected":"I went to school.","notes":"to/too real-word context error"}
+{"id":"semantic_002","category":"semantic","input":"It is to big.","expected":"It is too big.","notes":"to/too real-word context error"}
+{"id":"semantic_003","category":"semantic","input":"Their is a book on the table.","expected":"There is a book on the table.","notes":"there/their real-word context error"}
+{"id":"semantic_004","category":"semantic","input":"I can here the bell.","expected":"I can hear the bell.","notes":"hear/here real-word context error"}
+{"id":"semantic_005","category":"semantic","input":"Please right a sentence.","expected":"Please write a sentence.","notes":"write/right real-word context error"}
+{"id":"semantic_006","category":"semantic","input":"I no the answer.","expected":"I know the answer.","notes":"no/know real-word context error"}
+{"id":"grammar_001","category":"grammar","input":"The child are writing.","expected":"The child is writing.","notes":"subject verb agreement"}
+{"id":"grammar_002","category":"grammar","input":"She go to school.","expected":"She goes to school.","notes":"third person singular verb agreement"}
+{"id":"grammar_003","category":"grammar","input":"There book is on table","expected":"There is a book on the table.","notes":"missing auxiliary and articles"}
+{"id":"clean_001","category":"clean","input":"The child is writing.","expected":"The child is writing.","notes":"clean sentence should stay unchanged"}
+{"id":"clean_002","category":"clean","input":"I like swimming.","expected":"I like swimming.","notes":"clean sentence should stay unchanged"}

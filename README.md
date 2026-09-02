@@ -192,6 +192,24 @@ The project tracks "nearly 100%" accuracy as an evaluation target. It should be
 reported with measured correction accuracy, false-positive rate, and latency on
 curated handwriting samples rather than treated as a guaranteed runtime claim.
 
+## Correction Evaluation
+
+Run the correction gate against the committed curated manifest:
+
+```bash
+AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/evaluate_correction.py --local-files-only --output data/evaluation/correction_report.json
+```
+
+The current cached HF correction baseline on this machine is:
+
+- 12/12 exact matches on the curated correction set
+- 0/2 false positives on clean text
+- average latency 1008.7 ms, p95 latency 2312.2 ms
+
+This is a small benchmark set, not a guarantee for all handwriting. The mixed
+spelling-plus-grammar case is still too slow for the target real-time feel and
+must be optimized before Raspberry Pi validation.
+
 The older `contextual` and `rules` correction modes remain available only for
 debugging:
 

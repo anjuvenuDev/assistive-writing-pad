@@ -20,6 +20,9 @@ models/*
 data/*
 !data/examples/
 !data/examples/**
+!data/evaluation/
+!data/evaluation/correction_cases.jsonl
+!data/evaluation/correction_report.json
 
 # Local alternate git directory used in this sandbox.
 .git-local/
