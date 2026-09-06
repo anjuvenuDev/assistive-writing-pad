@@ -86,3 +86,14 @@ def test_runtime_settings_derive_huggingface_cache_from_model_cache(monkeypatch,
     monkeypatch.setenv("AWP_MODEL_CACHE", str(cache_root))
 
     assert RuntimeSettings.from_env().hf_cache_dir == cache_root / "huggingface"
+
+
+def test_runtime_settings_read_evaluation_capture_flags(monkeypatch, tmp_path) -> None:
+    manifest = tmp_path / "cases.jsonl"
+    monkeypatch.setenv("AWP_EVALUATION_CAPTURE_ENABLED", "1")
+    monkeypatch.setenv("AWP_EVALUATION_MANIFEST", str(manifest))
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.evaluation_capture_enabled is True
+    assert settings.evaluation_manifest_path == manifest

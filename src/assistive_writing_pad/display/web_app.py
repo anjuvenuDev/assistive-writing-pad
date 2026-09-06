@@ -13,6 +13,10 @@ from typing import Any, Dict, List, Optional
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import CorrectionResult, PipelineResult, StrokePoint
 from assistive_writing_pad.correction.factory import corrector_from_settings
+from assistive_writing_pad.eval.corpus import (
+    append_jsonl_record,
+    build_end_to_end_case_record,
+)
 from assistive_writing_pad.pipeline import WritingPipeline
 from assistive_writing_pad.recognition.trocr import RecognitionUnavailable, TrOCRHandwritingRecognizer
 
@@ -1023,6 +1027,292 @@ HTML = """<!doctype html>
 """
 
 
+CAPTURE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Evaluation Capture</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #667085;
+      --line: #d0d5dd;
+      --accent: #2563eb;
+      --good: #067647;
+      --bad: #b42318;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); }
+    header {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 22px; letter-spacing: 0; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+      padding: 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      min-width: 0;
+    }
+    #pad {
+      display: block;
+      width: 100%;
+      height: 460px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    label {
+      display: block;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    input, select, textarea {
+      width: 100%;
+      margin-top: 5px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 10px;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+      font-size: 15px;
+    }
+    textarea { min-height: 86px; resize: vertical; }
+    .toolbar { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      min-height: 38px;
+      padding: 8px 12px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    #status { color: var(--muted); font-size: 14px; }
+    #message { margin-top: 12px; font-size: 14px; color: var(--muted); }
+    #message.ok { color: var(--good); }
+    #message.err { color: var(--bad); }
+    @media (max-width: 860px) {
+      main { grid-template-columns: 1fr; }
+      #pad { height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Evaluation Capture</h1>
+    <div id="status">0 strokes</div>
+  </header>
+  <main>
+    <section>
+      <canvas id="pad"></canvas>
+      <div class="toolbar">
+        <button id="clear">Clear Screen</button>
+      </div>
+    </section>
+    <section>
+      <label>Case ID
+        <input id="caseId" autocomplete="off" placeholder="word_the_001">
+      </label>
+      <label>Category
+        <select id="category">
+          <option value="word">word</option>
+          <option value="sentence">sentence</option>
+          <option value="single_character">single_character</option>
+        </select>
+      </label>
+      <label>Expected Corrected Text
+        <textarea id="expected"></textarea>
+      </label>
+      <label>Expected Raw OCR Text
+        <textarea id="expectedRecognized"></textarea>
+      </label>
+      <label>Notes
+        <textarea id="notes"></textarea>
+      </label>
+      <button class="primary" id="save">Save Evaluation Case</button>
+      <div id="message"></div>
+    </section>
+  </main>
+  <script>
+    const canvas = document.getElementById("pad");
+    const ctx = canvas.getContext("2d");
+    const statusEl = document.getElementById("status");
+    const messageEl = document.getElementById("message");
+    let strokes = [];
+    let currentStroke = [];
+    let drawing = false;
+    let last = null;
+    let startedAt = 0;
+
+    function applyDrawingStyle() {
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "#111827";
+      ctx.fillStyle = "#111827";
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      const previous = canvas.width && canvas.height
+        ? ctx.getImageData(0, 0, canvas.width, canvas.height)
+        : null;
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (previous) {
+        try { ctx.putImageData(previous, 0, 0); } catch (_) {}
+      }
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      applyDrawingStyle();
+    }
+
+    function canvasPoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+        timestamp_ms: Math.round(performance.now() - startedAt),
+        pressure: (event.pressure != null && event.pressure > 0) ? event.pressure : 1.0
+      };
+    }
+
+    function start(event) {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      drawing = true;
+      startedAt = performance.now();
+      currentStroke = [];
+      last = canvasPoint(event);
+      currentStroke.push(last);
+      try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
+      event.preventDefault();
+    }
+
+    function move(event) {
+      if (!drawing) return;
+      const point = canvasPoint(event);
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(point.x, point.y);
+      ctx.stroke();
+      currentStroke.push(point);
+      last = point;
+      event.preventDefault();
+    }
+
+    function finish(event) {
+      try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
+      if (!drawing) return;
+      drawing = false;
+      currentStroke.push(canvasPoint(event));
+      strokes.push(currentStroke);
+      currentStroke = [];
+      last = null;
+      updateStatus();
+    }
+
+    function updateStatus() {
+      statusEl.textContent = strokes.length + (strokes.length === 1 ? " stroke" : " strokes");
+    }
+
+    function exportStrokePayload() {
+      return {
+        schema_version: 1,
+        source: "browser_capture",
+        strokes: strokes.map(stroke => stroke.map(point => ({
+          x: point.x,
+          y: point.y,
+          timestamp_ms: point.timestamp_ms,
+          pressure: point.pressure
+        })))
+      };
+    }
+
+    async function saveCase() {
+      messageEl.className = "";
+      messageEl.textContent = "Saving...";
+      const payload = {
+        id: document.getElementById("caseId").value,
+        category: document.getElementById("category").value,
+        expected: document.getElementById("expected").value,
+        expected_recognized: document.getElementById("expectedRecognized").value,
+        notes: document.getElementById("notes").value,
+        strokes: exportStrokePayload().strokes
+      };
+      try {
+        const response = await fetch("/api/evaluation/cases", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Save failed");
+        messageEl.className = "ok";
+        messageEl.textContent = "Saved " + result.id;
+      } catch (err) {
+        messageEl.className = "err";
+        messageEl.textContent = err.message;
+      }
+    }
+
+    function clearScreen() {
+      strokes = [];
+      currentStroke = [];
+      const ratio = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      applyDrawingStyle();
+      messageEl.textContent = "";
+      updateStatus();
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    canvas.addEventListener("pointerdown", start);
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerup", finish);
+    canvas.addEventListener("pointercancel", finish);
+    canvas.addEventListener("wheel", event => event.preventDefault(), { passive: false });
+    document.getElementById("clear").addEventListener("click", clearScreen);
+    document.getElementById("save").addEventListener("click", saveCase);
+    window.assistiveWritingPadCapture = { exportStrokePayload, strokeCount: () => strokes.length };
+    resizeCanvas();
+    updateStatus();
+  </script>
+</body>
+</html>
+"""
+
+
 class RecognitionService:
     def __init__(
         self,
@@ -1121,6 +1411,31 @@ class RecognitionService:
             "mode": "text",
         }
 
+    def append_evaluation_case_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.settings.evaluation_capture_enabled:
+            raise PermissionError("evaluation capture is disabled")
+
+        expected_recognized = payload.get("expected_recognized")
+        if isinstance(expected_recognized, str) and not expected_recognized.strip():
+            expected_recognized = None
+        record = build_end_to_end_case_record(
+            case_id=str(payload.get("id", "")),
+            category=str(payload.get("category", "")),
+            expected=str(payload.get("expected", "")),
+            expected_recognized=expected_recognized if isinstance(expected_recognized, str) else None,
+            source="manual",
+            notes=str(payload.get("notes", "")),
+            stroke_payload=payload,
+        )
+        append_jsonl_record(self.settings.evaluation_manifest_path, record)
+        return {
+            "id": record["id"],
+            "category": record["category"],
+            "source": record["source"],
+            "manifest": str(self.settings.evaluation_manifest_path),
+            "status": "saved",
+        }
+
 
 def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
     return [
@@ -1180,10 +1495,23 @@ def make_handler(service: RecognitionService):
             if self.path in {"/", "/index.html"}:
                 self._send(HTTPStatus.OK, HTML.encode("utf-8"), "text/html; charset=utf-8")
                 return
+            if self.path == "/capture":
+                if not service.settings.evaluation_capture_enabled:
+                    self._send_json(
+                        HTTPStatus.FORBIDDEN,
+                        {"error": "evaluation capture is disabled"},
+                    )
+                    return
+                self._send(
+                    HTTPStatus.OK,
+                    CAPTURE_HTML.encode("utf-8"),
+                    "text/html; charset=utf-8",
+                )
+                return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
         def do_POST(self) -> None:
-            if self.path not in {"/api/recognize", "/api/correct"}:
+            if self.path not in {"/api/recognize", "/api/correct", "/api/evaluation/cases"}:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
 
@@ -1192,10 +1520,15 @@ def make_handler(service: RecognitionService):
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
                 if self.path == "/api/recognize":
                     result = service.recognize_payload(payload)
-                else:
+                elif self.path == "/api/correct":
                     result = service.correct_payload(payload)
+                else:
+                    result = service.append_evaluation_case_payload(payload)
             except RecognitionUnavailable as exc:
                 self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
+                return
+            except PermissionError as exc:
+                self._send_json(HTTPStatus.FORBIDDEN, {"error": str(exc)})
                 return
             except Exception as exc:
                 self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -1224,6 +1557,8 @@ def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     service.warm_up_async()
     server = ThreadingHTTPServer((host, port), make_handler(service))
     print(f"Assistive Writing Pad running at http://{host}:{port}")
+    if service.settings.evaluation_capture_enabled:
+        print(f"Evaluation capture running at http://{host}:{port}/capture")
     print("Press Ctrl+C to stop.")
     server.serve_forever()
 

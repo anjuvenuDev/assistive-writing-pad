@@ -261,8 +261,8 @@ The current cached end-to-end baseline on this machine is:
 - average recognition CER/WER 0.0% / 0.0%
 - average corrected CER/WER 0.0% / 0.0%
 - 0 low-confidence cases and 0 review cases at threshold 0.65
-- average total latency 1747.1 ms, p95 total latency 1946.5 ms after warm-up
-- combined OCR plus correction model warm-up time 10540.8 ms
+- average total latency 1742.0 ms, p95 total latency 1920.3 ms after warm-up
+- combined OCR plus correction model warm-up time 10501.4 ms
 
 This gate caught and fixed a real integration issue where the grammar model
 rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
@@ -270,7 +270,18 @@ fragments. The HF correction pipeline now preserves isolated character outputs
 unchanged and records that correction was skipped for `isolated_character`.
 
 To add real word or sentence handwriting captures without adding more
-child-facing UI controls:
+child-facing UI controls, enable evaluator capture mode:
+
+```bash
+AWP_EVALUATION_CAPTURE_ENABLED=1 assistive-writing-web
+```
+
+Then open `/capture`, write the sample, label the expected text, and save it.
+The endpoint appends a `source: manual` row to
+`data/evaluation/end_to_end_cases.jsonl`; client-provided source labels are
+ignored so manual coverage cannot be spoofed from the browser.
+
+For console-based capture:
 
 1. Run the browser pad and write the sample.
 2. In the browser console, run:

@@ -3,7 +3,12 @@ import pytest
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import CorrectionResult, RecognitionResult
 from assistive_writing_pad.correction.contextual import ContextualCorrector
-from assistive_writing_pad.display.web_app import HTML, RecognitionService, stroke_groups_from_payload
+from assistive_writing_pad.display.web_app import (
+    CAPTURE_HTML,
+    HTML,
+    RecognitionService,
+    stroke_groups_from_payload,
+)
 
 
 class StubStrokeGroupRecognizer:
@@ -123,6 +128,64 @@ def test_browser_ui_keeps_child_facing_controls_simple() -> None:
     assert "scripts/setup_model_env.sh" not in HTML
     assert "Pointer diagnostics" not in HTML
     assert "exportStrokePayload" in HTML
+    assert "Save Evaluation Case" not in HTML
+
+
+def test_evaluation_capture_page_has_labeling_controls() -> None:
+    assert 'id="caseId"' in CAPTURE_HTML
+    assert 'id="category"' in CAPTURE_HTML
+    assert 'id="expected"' in CAPTURE_HTML
+    assert 'id="save"' in CAPTURE_HTML
+    assert "assistiveWritingPadCapture" in CAPTURE_HTML
+
+
+def test_evaluation_capture_is_disabled_by_default() -> None:
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=ContextualCorrector(model_enabled=False),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    with pytest.raises(PermissionError, match="disabled"):
+        service.append_evaluation_case_payload(
+            {
+                "id": "word_001",
+                "category": "word",
+                "expected": "the",
+                "strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]],
+            }
+        )
+
+
+def test_evaluation_capture_appends_manual_case_when_enabled(tmp_path) -> None:
+    manifest = tmp_path / "cases.jsonl"
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=ContextualCorrector(model_enabled=False),
+        settings=RuntimeSettings(
+            contextual_model_enabled=False,
+            evaluation_capture_enabled=True,
+            evaluation_manifest_path=manifest,
+        ),
+    )
+
+    result = service.append_evaluation_case_payload(
+        {
+            "id": "word_001",
+            "category": "word",
+            "expected": "the",
+            "expected_recognized": "",
+            "notes": "manual browser capture",
+            "source": "ignored-client-value",
+            "strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]],
+        }
+    )
+
+    assert result["id"] == "word_001"
+    assert result["source"] == "manual"
+    content = manifest.read_text(encoding="utf-8")
+    assert '"source":"manual"' in content
+    assert "ignored-client-value" not in content
 
 
 def test_recognition_service_warms_correction_models() -> None:

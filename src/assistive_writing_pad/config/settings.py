@@ -18,6 +18,8 @@ class RuntimeSettings:
     models_dir: Path = Path("models")
     data_dir: Path = Path("data")
     hf_cache_dir: Path = Path("models/cache/huggingface")
+    evaluation_capture_enabled: bool = False
+    evaluation_manifest_path: Path = Path("data/evaluation/end_to_end_cases.jsonl")
     api_correction_enabled: bool = False
     device_profile: str = "laptop"
     correction_mode: str = "hf"
@@ -61,6 +63,13 @@ class RuntimeSettings:
             data_dir=Path(os.environ.get("AWP_DATA_DIR", str(cls.data_dir))),
             hf_cache_dir=huggingface_cache_dir_from_env(
                 models_dir=Path(os.environ.get("AWP_MODELS_DIR", str(cls.models_dir))),
+            ),
+            evaluation_capture_enabled=_bool_env("AWP_EVALUATION_CAPTURE_ENABLED", False),
+            evaluation_manifest_path=Path(
+                os.environ.get(
+                    "AWP_EVALUATION_MANIFEST",
+                    str(cls.evaluation_manifest_path),
+                )
             ),
             api_correction_enabled=_bool_env("AWP_API_CORRECTION_ENABLED", False),
             device_profile=device_profile,
