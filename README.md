@@ -314,6 +314,16 @@ manual word or sentence handwriting captures yet. Production readiness requires
 manual cases for `single_character`, `word`, and `sentence` categories before
 accuracy claims are meaningful.
 
+Collect the current model, coverage, and gate evidence into one artifact:
+
+```bash
+AWP_TROCR_LOCAL_FILES_ONLY=1 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/collect_evaluation_evidence.py --output data/evaluation/readiness_report.json
+```
+
+This command exits non-zero until the production coverage profile passes. It
+still writes the evidence report so blockers are auditable instead of hidden in
+terminal output.
+
 ## Correction Evaluation
 
 Run the correction gate against the committed curated manifest:

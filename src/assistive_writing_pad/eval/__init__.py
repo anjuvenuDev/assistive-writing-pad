@@ -42,6 +42,13 @@ from assistive_writing_pad.eval.recognition_eval import (
     load_recognition_cases,
     normalize_for_recognition_eval,
 )
+from assistive_writing_pad.eval.readiness import (
+    GateFinding,
+    ReadinessReport,
+    ReadinessThresholds,
+    build_readiness_report,
+    model_configuration,
+)
 
 __all__ = [
     "CategoryMetrics",
@@ -76,4 +83,9 @@ __all__ = [
     "evaluate_recognition_cases",
     "load_recognition_cases",
     "normalize_for_recognition_eval",
+    "GateFinding",
+    "ReadinessReport",
+    "ReadinessThresholds",
+    "build_readiness_report",
+    "model_configuration",
 ]

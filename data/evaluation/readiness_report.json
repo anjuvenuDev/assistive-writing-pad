@@ -1,0 +1,258 @@
+{
+  "generated_at": "2026-09-06T15:39:35.533200+00:00",
+  "production_ready": false,
+  "smoke_ready": true,
+  "model_configuration": {
+    "device_profile": "laptop",
+    "hf_cache_dir": "models/cache/huggingface",
+    "trocr_model": "microsoft/trocr-base-handwritten",
+    "trocr_local_files_only": true,
+    "correction_mode": "hf",
+    "hf_spelling_model_enabled": true,
+    "hf_spelling_model": "oliverguhr/spelling-correction-english-base",
+    "hf_semantic_model_enabled": true,
+    "hf_semantic_model": "distilbert/distilbert-base-uncased",
+    "hf_grammar_model_enabled": true,
+    "hf_grammar_model": "gotutiyan/gec-bart-base",
+    "hf_correction_local_files_only": true,
+    "evaluation_capture_enabled": false,
+    "evaluation_manifest_path": "data/evaluation/end_to_end_cases.jsonl"
+  },
+  "correction_summary": {
+    "total": 12,
+    "exact": 12,
+    "accuracy": 1.0,
+    "false_positives": 0,
+    "false_positive_rate": 0.0,
+    "missed_corrections": 0,
+    "average_latency_ms": 753.038,
+    "p95_latency_ms": 898.986,
+    "by_category": {
+      "clean": {
+        "total": 2,
+        "exact": 2,
+        "accuracy": 1.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "missed_corrections": 0,
+        "average_latency_ms": 662.332,
+        "p95_latency_ms": 684.202
+      },
+      "grammar": {
+        "total": 3,
+        "exact": 3,
+        "accuracy": 1.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "missed_corrections": 0,
+        "average_latency_ms": 749.996,
+        "p95_latency_ms": 824.607
+      },
+      "mixed": {
+        "total": 1,
+        "exact": 1,
+        "accuracy": 1.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "missed_corrections": 0,
+        "average_latency_ms": 594.49,
+        "p95_latency_ms": 594.49
+      },
+      "semantic": {
+        "total": 6,
+        "exact": 6,
+        "accuracy": 1.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "missed_corrections": 0,
+        "average_latency_ms": 811.218,
+        "p95_latency_ms": 934.423
+      }
+    }
+  },
+  "end_to_end_summary": {
+    "total": 2,
+    "recognition_exact": 2,
+    "corrected_exact": 2,
+    "recognition_accuracy": 1.0,
+    "corrected_accuracy": 1.0,
+    "average_recognition_cer": 0.0,
+    "average_corrected_cer": 0.0,
+    "average_recognition_wer": 0.0,
+    "average_corrected_wer": 0.0,
+    "average_total_latency_ms": 1741.97,
+    "p95_total_latency_ms": 1920.35,
+    "low_confidence": 0,
+    "needs_review": 0,
+    "by_category": {
+      "single_character": {
+        "total": 2,
+        "recognition_exact": 2,
+        "corrected_exact": 2,
+        "recognition_accuracy": 1.0,
+        "corrected_accuracy": 1.0,
+        "average_recognition_cer": 0.0,
+        "average_corrected_cer": 0.0,
+        "average_recognition_wer": 0.0,
+        "average_corrected_wer": 0.0,
+        "average_total_latency_ms": 1741.97,
+        "p95_total_latency_ms": 1920.35,
+        "low_confidence": 0,
+        "needs_review": 0
+      }
+    }
+  },
+  "smoke_coverage": {
+    "total_cases": 2,
+    "manual_cases": 0,
+    "by_category": {
+      "single_character": 2
+    },
+    "by_source": {
+      "smoke": 2
+    },
+    "passed": true,
+    "findings": [
+      {
+        "requirement": "single_character.min_cases",
+        "actual": 2,
+        "expected": 2,
+        "passed": true
+      },
+      {
+        "requirement": "single_character.min_manual_cases",
+        "actual": 0,
+        "expected": 0,
+        "passed": true
+      }
+    ]
+  },
+  "production_coverage": {
+    "total_cases": 2,
+    "manual_cases": 0,
+    "by_category": {
+      "single_character": 2
+    },
+    "by_source": {
+      "smoke": 2
+    },
+    "passed": false,
+    "findings": [
+      {
+        "requirement": "single_character.min_cases",
+        "actual": 2,
+        "expected": 20,
+        "passed": false
+      },
+      {
+        "requirement": "single_character.min_manual_cases",
+        "actual": 0,
+        "expected": 20,
+        "passed": false
+      },
+      {
+        "requirement": "word.min_cases",
+        "actual": 0,
+        "expected": 50,
+        "passed": false
+      },
+      {
+        "requirement": "word.min_manual_cases",
+        "actual": 0,
+        "expected": 50,
+        "passed": false
+      },
+      {
+        "requirement": "sentence.min_cases",
+        "actual": 0,
+        "expected": 50,
+        "passed": false
+      },
+      {
+        "requirement": "sentence.min_manual_cases",
+        "actual": 0,
+        "expected": 50,
+        "passed": false
+      }
+    ]
+  },
+  "findings": [
+    {
+      "gate": "correction",
+      "metric": "accuracy",
+      "actual": 1.0,
+      "expected": ">= 0.98",
+      "passed": true
+    },
+    {
+      "gate": "correction",
+      "metric": "false_positives",
+      "actual": 0,
+      "expected": "<= 0",
+      "passed": true
+    },
+    {
+      "gate": "correction",
+      "metric": "missed_corrections",
+      "actual": 0,
+      "expected": "<= 0",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "recognition_accuracy",
+      "actual": 1.0,
+      "expected": ">= 0.95",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "corrected_accuracy",
+      "actual": 1.0,
+      "expected": ">= 0.98",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "average_recognition_cer",
+      "actual": 0.0,
+      "expected": "<= 0.05",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "average_corrected_cer",
+      "actual": 0.0,
+      "expected": "<= 0.02",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "low_confidence",
+      "actual": 0,
+      "expected": "<= 0",
+      "passed": true
+    },
+    {
+      "gate": "end_to_end",
+      "metric": "needs_review",
+      "actual": 0,
+      "expected": "<= 0",
+      "passed": true
+    },
+    {
+      "gate": "coverage",
+      "metric": "smoke_profile",
+      "actual": true,
+      "expected": true,
+      "passed": true
+    },
+    {
+      "gate": "coverage",
+      "metric": "production_profile",
+      "actual": false,
+      "expected": true,
+      "passed": false
+    }
+  ]
+}
