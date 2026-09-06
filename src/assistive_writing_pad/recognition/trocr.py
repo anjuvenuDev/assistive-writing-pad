@@ -24,6 +24,11 @@ AWP_TROCR_NUM_BEAMS
 AWP_TROCR_CANDIDATES
     Number of decoded alternatives to return in metadata/top predictions
     (default: 3, capped by beam count).
+AWP_HF_CACHE_DIR
+    Hugging Face cache directory for OCR and correction models. Defaults to
+    models/cache/huggingface, or $AWP_MODEL_CACHE/huggingface when set.
+AWP_TROCR_LOCAL_FILES_ONLY
+    Set to "1" to require the OCR model to already exist in the local cache.
 AWP_OCR_MODE
     Accepted for backward compatibility; every web mode uses OCR.
 """
@@ -36,10 +41,12 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
+from assistive_writing_pad.config.settings import huggingface_cache_dir_from_env
 from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
 logger = logging.getLogger(__name__)
@@ -98,6 +105,17 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def default_huggingface_cache_dir() -> Path:
+    return huggingface_cache_dir_from_env()
+
+
 def _normalize_requested_mode(mode: str) -> str:
     if mode in {"auto", "character", "word", "ocr"}:
         return mode
@@ -138,12 +156,20 @@ class RecognitionUnavailable(RuntimeError):
 @dataclass
 class TrOCRHandwritingRecognizer:
     model_name: str = DEFAULT_TROCR_MODEL
+    cache_dir: Optional[Path] = None
+    local_files_only: Optional[bool] = None
     max_new_tokens: int = 48
     num_beams: int = _int_env("AWP_TROCR_NUM_BEAMS", _DEFAULT_NUM_BEAMS)
     num_return_sequences: int = _int_env("AWP_TROCR_CANDIDATES", _DEFAULT_NUM_CANDIDATES)
     max_word_segments: int = _int_env("AWP_TROCR_MAX_WORD_SEGMENTS", _DEFAULT_MAX_WORD_SEGMENTS)
 
     def __post_init__(self) -> None:
+        if self.cache_dir is None:
+            self.cache_dir = default_huggingface_cache_dir()
+        else:
+            self.cache_dir = Path(self.cache_dir)
+        if self.local_files_only is None:
+            self.local_files_only = _bool_env("AWP_TROCR_LOCAL_FILES_ONLY", False)
         self.num_beams = max(1, int(self.num_beams))
         self.num_return_sequences = max(1, min(int(self.num_return_sequences), self.num_beams))
         self.max_word_segments = max(1, int(self.max_word_segments))
@@ -160,6 +186,11 @@ class TrOCRHandwritingRecognizer:
             )
 
         return self.recognize_stroke_groups([strokes], mode=mode)
+
+    def warm_up(self) -> None:
+        self._ensure_loaded()
+        image = np.full((_DEFAULT_RENDER_H, _DEFAULT_RENDER_W, 3), 255, dtype=np.uint8)
+        self._run_ocr(image)
 
     def recognize_stroke_groups(
         self,
@@ -280,6 +311,8 @@ class TrOCRHandwritingRecognizer:
             metadata={
                 "recognizer": "trocr",
                 "model": self.model_name,
+                "cache_dir": str(self.cache_dir) if self.cache_dir is not None else "",
+                "local_files_only": str(bool(self.local_files_only)).lower(),
                 "lines": str(len(lines)),
                 "line_results": json.dumps(line_results),
                 "mode": effective_mode,
@@ -320,6 +353,8 @@ class TrOCRHandwritingRecognizer:
             metadata={
                 "recognizer": "trocr",
                 "model": self.model_name,
+                "cache_dir": str(self.cache_dir) if self.cache_dir is not None else "",
+                "local_files_only": str(bool(self.local_files_only)).lower(),
                 "raw_text": raw_text.strip(),
                 "mode": "character",
                 "requested_mode": requested_mode,
@@ -397,11 +432,28 @@ class TrOCRHandwritingRecognizer:
             ) from exc
 
         self._torch = torch
-        self._processor = TrOCRProcessor.from_pretrained(self.model_name, use_fast=False)
-        self._model = VisionEncoderDecoderModel.from_pretrained(
-            self.model_name,
-            low_cpu_mem_usage=False,
-        )
+        load_kwargs = {
+            "cache_dir": str(self.cache_dir) if self.cache_dir is not None else None,
+            "local_files_only": bool(self.local_files_only),
+        }
+        try:
+            self._processor = TrOCRProcessor.from_pretrained(
+                self.model_name,
+                use_fast=False,
+                **load_kwargs,
+            )
+            self._model = VisionEncoderDecoderModel.from_pretrained(
+                self.model_name,
+                low_cpu_mem_usage=False,
+                **load_kwargs,
+            )
+        except Exception as exc:
+            raise RecognitionUnavailable(
+                f"Could not load TrOCR model {self.model_name!r} from "
+                f"{self.cache_dir} with local_files_only={bool(self.local_files_only)}. "
+                "Run `.venv/bin/python scripts/cache_hf_ocr_model.py --model "
+                f"{self.model_name}` before offline recognition."
+            ) from exc
         self._model.to(torch.device("cpu"))
         self._model.eval()
 
@@ -991,7 +1043,7 @@ def _shape_hint_for_single_character(
         return None
 
     guess = current_guess.strip().lower()
-    if guess not in {"", "a", "m", "t", "l", "i", "j", "o", "q", "g", "r"}:
+    if guess not in {"", "a", "m", "s", "t", "l", "i", "j", "o", "q", "g", "r"}:
         return None
 
     dot_hint = _dot_above_stem_hint(stroke_groups)

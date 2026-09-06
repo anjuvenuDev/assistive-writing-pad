@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from typing import Optional
 
 _SRC = Path(__file__).parent.parent / "src"
 if str(_SRC) not in sys.path:
@@ -149,7 +150,7 @@ def correction_gate_failures(
     min_accuracy: float,
     max_false_positive_rate: float,
     max_missed_corrections: int,
-    max_p95_latency_ms: float | None,
+    max_p95_latency_ms: Optional[float],
 ) -> list[str]:
     summary = report.summary
     failures = []

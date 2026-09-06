@@ -23,6 +23,8 @@ data/*
 !data/evaluation/
 !data/evaluation/correction_cases.jsonl
 !data/evaluation/correction_report.json
+!data/evaluation/recognition_cases.jsonl
+!data/evaluation/recognition_report.json
 
 # Local alternate git directory used in this sandbox.
 .git-local/

@@ -11,4 +11,6 @@ PYTHON_BIN="${PYTHON_BIN:-/home/anj/.pyenv/versions/3.10.12/bin/python}"
 .venv/bin/python -m pip install -e ".[models,dev]"
 
 echo "Model environment ready."
+echo "Cache OCR model: .venv/bin/python scripts/cache_hf_ocr_model.py --model microsoft/trocr-base-handwritten"
+echo "Cache correction models: .venv/bin/python scripts/cache_hf_correction_models.py"
 echo "Run: .venv/bin/python -m assistive_writing_pad.display.web_app"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class RuntimeSettings:
     max_word_latency_ms: int = 500
     models_dir: Path = Path("models")
     data_dir: Path = Path("data")
+    hf_cache_dir: Path = Path("models/cache/huggingface")
     api_correction_enabled: bool = False
     device_profile: str = "laptop"
     correction_mode: str = "hf"
@@ -57,6 +59,9 @@ class RuntimeSettings:
             max_word_latency_ms=_int_env("AWP_MAX_WORD_LATENCY_MS", cls.max_word_latency_ms),
             models_dir=Path(os.environ.get("AWP_MODELS_DIR", str(cls.models_dir))),
             data_dir=Path(os.environ.get("AWP_DATA_DIR", str(cls.data_dir))),
+            hf_cache_dir=huggingface_cache_dir_from_env(
+                models_dir=Path(os.environ.get("AWP_MODELS_DIR", str(cls.models_dir))),
+            ),
             api_correction_enabled=_bool_env("AWP_API_CORRECTION_ENABLED", False),
             device_profile=device_profile,
             correction_mode=correction_mode,
@@ -215,3 +220,14 @@ def _int_env(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def huggingface_cache_dir_from_env(*, models_dir: Optional[Path] = None) -> Path:
+    raw_cache = os.environ.get("AWP_HF_CACHE_DIR", "").strip()
+    if raw_cache:
+        return Path(raw_cache)
+    raw_root = os.environ.get("AWP_MODEL_CACHE", "").strip()
+    if raw_root:
+        return Path(raw_root) / "huggingface"
+    root = models_dir or Path("models")
+    return root / "cache" / "huggingface"

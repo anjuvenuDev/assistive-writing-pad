@@ -1,0 +1,50 @@
+{
+  "summary": {
+    "total": 2,
+    "exact": 2,
+    "accuracy": 1.0,
+    "average_cer": 0.0,
+    "average_wer": 0.0,
+    "average_latency_ms": 2039.577,
+    "p95_latency_ms": 2241.556,
+    "low_confidence": 0,
+    "by_category": {
+      "single_character": {
+        "total": 2,
+        "exact": 2,
+        "accuracy": 1.0,
+        "average_cer": 0.0,
+        "average_wer": 0.0,
+        "average_latency_ms": 2039.577,
+        "p95_latency_ms": 2241.556,
+        "low_confidence": 0
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "single_h_001",
+      "category": "single_character",
+      "expected_text": "h",
+      "output_text": "h",
+      "exact_match": true,
+      "char_error_rate": 0.0,
+      "word_error_rate": 0.0,
+      "latency_ms": 1815.157,
+      "confidence": 0.8628,
+      "low_confidence": false
+    },
+    {
+      "id": "single_i_001",
+      "category": "single_character",
+      "expected_text": "i",
+      "output_text": "i",
+      "exact_match": true,
+      "char_error_rate": 0.0,
+      "word_error_rate": 0.0,
+      "latency_ms": 2263.998,
+      "confidence": 0.8352,
+      "low_confidence": false
+    }
+  ]
+}

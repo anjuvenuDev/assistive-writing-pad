@@ -468,7 +468,7 @@ HTML = """<!doctype html>
     let last           = null;  // last canvas-space point {x, y, ...}
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
-    let currentMode    = "ocr";
+    let currentMode    = "auto";
     let lastRecognitionAlternatives = [];
     let lastAlternativeIndex = 0;
 
@@ -1028,11 +1028,13 @@ class RecognitionService:
             thread.start()
 
     def _warm_up_ocr_model(self) -> None:
+        warm_up = getattr(self.recognizer, "warm_up", None)
         ensure_loaded = getattr(self.recognizer, "_ensure_loaded", None)
-        if not callable(ensure_loaded):
+        loader = warm_up if callable(warm_up) else ensure_loaded
+        if not callable(loader):
             return
         try:
-            ensure_loaded()
+            loader()
             logger.info("OCR model warmed up")
         except Exception as exc:
             logger.warning("OCR model warm-up failed; first recognition may retry: %s", exc)
@@ -1050,7 +1052,7 @@ class RecognitionService:
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         stroke_groups = stroke_groups_from_payload(payload)
         # Accept legacy mode values, but recognition always uses OCR.
-        mode = payload.get("mode", "ocr")
+        mode = payload.get("mode", "auto")
         if mode not in ("auto", "character", "word", "ocr"):
             mode = "ocr"
         result = self.recognizer.recognize_stroke_groups(stroke_groups, mode=mode)

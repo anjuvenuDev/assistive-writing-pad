@@ -27,7 +27,7 @@ What has been done so far:
   Face spelling, semantic real-word, and grammatical-error-correction stages
 - Tests covering capture, preprocessing, template recognition, TrOCR rendering, UI helpers, web payload parsing, and pipeline behavior
 
-The next major gaps are real handwriting accuracy benchmarking, broader sentence-level
+The next major gaps are real handwriting sample collection, broader sentence-level
 grammar evaluation, word/line segmentation refinement, and Raspberry Pi performance validation.
 
 ## Repository Layout
@@ -100,6 +100,18 @@ After setup, run the app with:
 The first run downloads the model from Hugging Face and can take time. After
 that, the UI runs it from the local cache.
 
+To prefill the OCR cache explicitly:
+
+```bash
+.venv/bin/python scripts/cache_hf_ocr_model.py --model microsoft/trocr-base-handwritten
+```
+
+The correction cache can be prefilled separately:
+
+```bash
+.venv/bin/python scripts/cache_hf_correction_models.py
+```
+
 For best compatibility with PyTorch, use Python 3.9-3.11 for the model
 environment.
 
@@ -107,6 +119,8 @@ Model and diagnostic artifacts default to project-local paths so laptop and
 Raspberry Pi setup can be copied or backed up predictably:
 
 - Generic model cache root: `models/cache`
+- Hugging Face OCR/correction cache: `models/cache/huggingface`
+- Override Hugging Face cache with `AWP_HF_CACHE_DIR`
 - EMNIST character-model cache: `models/cache/emnist`
 - Override cache root with `AWP_MODEL_CACHE`
 - Override EMNIST cache with `AWP_EMNIST_CACHE_DIR`
@@ -153,12 +167,14 @@ Useful runtime flags:
 ```bash
 AWP_DEVICE_PROFILE=laptop
 AWP_CORRECTION_MODE=hf
+AWP_HF_CACHE_DIR=models/cache/huggingface
 AWP_HF_SPELLING_MODEL=oliverguhr/spelling-correction-english-base
 AWP_HF_SEMANTIC_MODEL=distilbert/distilbert-base-uncased
 AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
 AWP_HF_CORRECTION_CANDIDATES=3
 AWP_HF_CORRECTION_NUM_BEAMS=4
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=0
+AWP_TROCR_LOCAL_FILES_ONLY=0
 AWP_CONTEXTUAL_MODEL_ENABLED=0
 AWP_CONTEXTUAL_MODEL=distilbert/distilbert-base-uncased
 AWP_PRELOAD_OCR_MODEL=1
@@ -185,9 +201,11 @@ model cache:
 AWP_DEVICE_PROFILE=raspberry_pi
 AWP_TROCR_MODEL=microsoft/trocr-small-handwritten
 AWP_CORRECTION_MODE=hf
+AWP_HF_CACHE_DIR=models/cache/huggingface
 AWP_HF_SEMANTIC_MODEL=distilbert/distilbert-base-uncased
 AWP_HF_GRAMMAR_MODEL=gotutiyan/gec-bart-base
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1
+AWP_TROCR_LOCAL_FILES_ONLY=1
 AWP_PRELOAD_OCR_MODEL=0
 AWP_PRELOAD_CORRECTION_MODELS=0
 ```
@@ -195,6 +213,33 @@ AWP_PRELOAD_CORRECTION_MODELS=0
 The project tracks "nearly 100%" accuracy as an evaluation target. It should be
 reported with measured correction accuracy, false-positive rate, and latency on
 curated handwriting samples rather than treated as a guaranteed runtime claim.
+
+## Recognition Evaluation
+
+Run the recognition gate against committed stroke fixtures:
+
+```bash
+AWP_TROCR_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/evaluate_recognition.py --local-files-only --mode auto --output data/evaluation/recognition_report.json
+```
+
+Use `--min-exact-accuracy`, `--max-average-cer`, `--max-average-wer`,
+`--max-low-confidence`, and `--max-p95-latency-ms` to turn the report into a
+hardware-specific release gate. The committed fixture set is intentionally
+small and should be expanded with real child handwriting captures before
+claiming production recognition accuracy.
+
+The current cached TrOCR recognition baseline on this machine is:
+
+- 2/2 exact matches on the committed stroke fixture set
+- average CER/WER 0.0% / 0.0%
+- 0 low-confidence cases
+- average latency 2039.6 ms, p95 latency 2241.6 ms after OCR warm-up
+- OCR model warm-up time 11914.3 ms
+
+This is only a smoke baseline for the recognition module. It verifies offline
+cache loading, auto single-character routing, and the evaluation gate; it is not
+large enough to claim handwriting recognition accuracy for arbitrary words or
+sentences.
 
 ## Correction Evaluation
 
@@ -212,8 +257,8 @@ The current cached HF correction baseline on this machine is:
 
 - 12/12 exact matches on the curated correction set
 - 0/2 false positives on clean text
-- average latency 703.3 ms, p95 latency 852.0 ms after model warm-up
-- correction model warm-up time 3252.3 ms
+- average latency 840.5 ms, p95 latency 1144.3 ms after model warm-up
+- correction model warm-up time 5636.7 ms
 
 This is a small benchmark set, not a guarantee for all handwriting. The mixed
 spelling-plus-grammar case is now within the laptop gate, but Raspberry Pi

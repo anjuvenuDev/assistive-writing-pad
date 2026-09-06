@@ -183,6 +183,22 @@ def test_huggingface_pipeline_warms_active_runners_in_stage_order() -> None:
     assert warm_log == ["spelling", "semantic", "grammar"]
 
 
+def test_huggingface_pipeline_uses_configured_cache_dir(tmp_path) -> None:
+    from assistive_writing_pad.config.settings import RuntimeSettings
+
+    cache_dir = tmp_path / "hf-cache"
+    pipeline = HuggingFaceCorrectionPipeline.from_settings(
+        RuntimeSettings(
+            hf_cache_dir=cache_dir,
+            hf_semantic_model_enabled=False,
+            hf_grammar_model_enabled=False,
+        )
+    )
+
+    assert pipeline.spelling_runner is not None
+    assert getattr(pipeline.spelling_runner, "cache_dir") == cache_dir
+
+
 def test_model_output_guard_rejects_unrelated_long_text() -> None:
     assert not is_acceptable_model_output(
         "I lik swiming",

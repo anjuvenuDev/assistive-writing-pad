@@ -71,3 +71,18 @@ def test_runtime_settings_allow_correction_preload_override(monkeypatch) -> None
     monkeypatch.setenv("AWP_PRELOAD_CORRECTION_MODELS", "1")
 
     assert RuntimeSettings.from_env().preload_correction_models is True
+
+
+def test_runtime_settings_read_explicit_huggingface_cache(monkeypatch, tmp_path) -> None:
+    cache_dir = tmp_path / "hf-cache"
+    monkeypatch.setenv("AWP_HF_CACHE_DIR", str(cache_dir))
+
+    assert RuntimeSettings.from_env().hf_cache_dir == cache_dir
+
+
+def test_runtime_settings_derive_huggingface_cache_from_model_cache(monkeypatch, tmp_path) -> None:
+    cache_root = tmp_path / "model-cache"
+    monkeypatch.delenv("AWP_HF_CACHE_DIR", raising=False)
+    monkeypatch.setenv("AWP_MODEL_CACHE", str(cache_root))
+
+    assert RuntimeSettings.from_env().hf_cache_dir == cache_root / "huggingface"

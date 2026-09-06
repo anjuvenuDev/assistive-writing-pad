@@ -84,6 +84,32 @@ def test_single_character_candidates_promote_shape_hint() -> None:
     assert any(candidate.text == "a" for candidate in candidates)
 
 
+def test_single_character_candidates_promote_h_when_ocr_reads_s() -> None:
+    h_stroke = _stroke(
+        [
+            (10, 2),
+            (10, 10),
+            (10, 22),
+            (10, 36),
+            (12, 30),
+            (18, 24),
+            (24, 24),
+            (26, 30),
+            (26, 36),
+        ]
+    )
+
+    text, confidence, candidates, reason = _single_character_candidates(
+        [h_stroke],
+        [_OCRCandidate(text="s", confidence=0.70, raw_text="s")],
+    )
+
+    assert text == "h"
+    assert confidence >= 0.82
+    assert reason == "shape_hint"
+    assert any(candidate.text == "s" for candidate in candidates)
+
+
 def test_single_character_candidates_use_dot_hint_for_i() -> None:
     dot = _stroke([(20, 6), (21, 7), (20, 8)])
     stem = _stroke([(20, 16), (20, 24), (20, 32), (22, 36)])

@@ -5,6 +5,7 @@ from assistive_writing_pad.recognition.trocr import (
     _DEFAULT_RENDER_H,
     _DEFAULT_RENDER_W,
     _normalize_requested_mode,
+    default_huggingface_cache_dir,
     render_strokes_for_trocr,
 )
 
@@ -36,6 +37,34 @@ def test_default_trocr_model_prioritizes_base_handwriting_ocr() -> None:
 
     assert DEFAULT_TROCR_MODEL == "microsoft/trocr-base-handwritten"
     assert recognizer.model_name == "microsoft/trocr-base-handwritten"
+
+
+def test_trocr_uses_project_huggingface_cache_by_default(monkeypatch, tmp_path) -> None:
+    cache_root = tmp_path / "cache-root"
+    monkeypatch.delenv("AWP_HF_CACHE_DIR", raising=False)
+    monkeypatch.setenv("AWP_MODEL_CACHE", str(cache_root))
+
+    recognizer = TrOCRHandwritingRecognizer()
+
+    assert default_huggingface_cache_dir() == cache_root / "huggingface"
+    assert recognizer.cache_dir == cache_root / "huggingface"
+
+
+def test_trocr_accepts_explicit_cache_and_local_files_only(tmp_path) -> None:
+    cache_dir = tmp_path / "hf"
+    recognizer = TrOCRHandwritingRecognizer(
+        cache_dir=cache_dir,
+        local_files_only=True,
+    )
+
+    assert recognizer.cache_dir == cache_dir
+    assert recognizer.local_files_only is True
+
+
+def test_trocr_reads_local_files_only_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_TROCR_LOCAL_FILES_ONLY", "1")
+
+    assert TrOCRHandwritingRecognizer().local_files_only is True
 
 
 def test_legacy_modes_are_accepted_as_ocr_requests() -> None:

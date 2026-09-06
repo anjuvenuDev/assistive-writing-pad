@@ -36,7 +36,7 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = RuntimeSettings.from_env()
-    cache_dir = args.cache_dir or settings.models_dir / "cache" / "huggingface"
+    cache_dir = args.cache_dir or settings.hf_cache_dir
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     model_ids = [

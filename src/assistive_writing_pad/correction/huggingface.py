@@ -223,7 +223,7 @@ class HuggingFaceCorrectionPipeline:
 
     @classmethod
     def from_settings(cls, settings: RuntimeSettings) -> "HuggingFaceCorrectionPipeline":
-        cache_dir = settings.models_dir / "cache" / "huggingface"
+        cache_dir = settings.hf_cache_dir
         common_kwargs = {
             "cache_dir": cache_dir,
             "local_files_only": settings.hf_correction_local_files_only,

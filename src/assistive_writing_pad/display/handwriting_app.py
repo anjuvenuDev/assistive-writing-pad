@@ -310,11 +310,13 @@ class HandwritingApp:
             threading.Thread(target=self._warm_up_correction_models, daemon=True).start()
 
     def _warm_up_ocr_model(self) -> None:
+        warm_up = getattr(self.recognizer, "warm_up", None)
         ensure_loaded = getattr(self.recognizer, "_ensure_loaded", None)
-        if not callable(ensure_loaded):
+        loader = warm_up if callable(warm_up) else ensure_loaded
+        if not callable(loader):
             return
         try:
-            ensure_loaded()
+            loader()
             logger.info("Tk OCR model warmed up")
         except Exception as exc:
             logger.warning("Tk OCR warm-up failed; first recognition may retry: %s", exc)
@@ -421,7 +423,7 @@ class HandwritingApp:
     ) -> RecognitionResult:
         recognize_groups = getattr(self.recognizer, "recognize_stroke_groups", None)
         if callable(recognize_groups):
-            return recognize_groups(stroke_snapshot, mode="ocr")
+            return recognize_groups(stroke_snapshot, mode="auto")
         return self.recognizer.recognize(flatten_strokes(stroke_snapshot))
 
     def _apply_pipeline_result(

@@ -68,7 +68,7 @@ def test_recognition_service_returns_realtime_correction_metadata() -> None:
     assert result["corrected_text"] == "the cat sat on a chair"
     assert result["text"] == "the cat sat on a chair"
     assert result["needs_review"] is False
-    assert result["mode"] == "ocr"
+    assert result["mode"] == "auto"
     assert result["corrections"][0]["original"] == "teh"
     assert result["correction_metadata"] == {}
 
