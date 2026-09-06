@@ -122,6 +122,7 @@ def test_browser_ui_keeps_child_facing_controls_simple() -> None:
     assert 'id="clearText"' not in HTML
     assert "scripts/setup_model_env.sh" not in HTML
     assert "Pointer diagnostics" not in HTML
+    assert "exportStrokePayload" in HTML
 
 
 def test_recognition_service_warms_correction_models() -> None:

@@ -261,13 +261,34 @@ The current cached end-to-end baseline on this machine is:
 - average recognition CER/WER 0.0% / 0.0%
 - average corrected CER/WER 0.0% / 0.0%
 - 0 low-confidence cases and 0 review cases at threshold 0.65
-- average total latency 2016.3 ms, p95 total latency 2227.4 ms after warm-up
-- combined OCR plus correction model warm-up time 13194.6 ms
+- average total latency 1734.7 ms, p95 total latency 1924.1 ms after warm-up
+- combined OCR plus correction model warm-up time 12749.0 ms
 
 This gate caught and fixed a real integration issue where the grammar model
 rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
 fragments. The HF correction pipeline now preserves isolated character outputs
 unchanged and records that correction was skipped for `isolated_character`.
+
+To add real word or sentence handwriting captures without adding more
+child-facing UI controls:
+
+1. Run the browser pad and write the sample.
+2. In the browser console, run:
+
+```js
+JSON.stringify(window.assistiveWritingPad.exportStrokePayload())
+```
+
+3. Store that JSON as a temporary payload and append it to the evaluation
+   manifest:
+
+```bash
+.venv/bin/python scripts/append_end_to_end_case.py --payload /tmp/payload.json --id sentence_001 --category sentence --expected "The child is writing."
+```
+
+If the raw OCR target should intentionally differ from the corrected output,
+pass `--expected-recognized` as well. Every added case should then be run
+through `scripts/evaluate_end_to_end.py` before being committed.
 
 ## Correction Evaluation
 

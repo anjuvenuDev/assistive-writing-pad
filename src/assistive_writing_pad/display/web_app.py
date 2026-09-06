@@ -973,6 +973,25 @@ HTML = """<!doctype html>
       updateAlternativeButton();
     }
 
+    function exportStrokePayload() {
+      return {
+        schema_version: 1,
+        source: "browser",
+        mode: currentMode,
+        strokes: strokes.map(stroke => stroke.map(point => ({
+          x: point.x,
+          y: point.y,
+          timestamp_ms: point.timestamp_ms,
+          pressure: point.pressure
+        })))
+      };
+    }
+
+    window.assistiveWritingPad = {
+      exportStrokePayload,
+      strokeCount: () => strokes.length
+    };
+
     /* -----------------------------------------------------------------------
      * Event wiring
      * --------------------------------------------------------------------- */

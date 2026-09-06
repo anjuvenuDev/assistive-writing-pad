@@ -10,6 +10,12 @@ from assistive_writing_pad.eval.correction_eval import (
     load_correction_cases,
     normalize_for_eval,
 )
+from assistive_writing_pad.eval.corpus import (
+    append_jsonl_record,
+    build_end_to_end_case_record,
+    stroke_groups_from_capture_payload,
+    stroke_groups_to_jsonable,
+)
 from assistive_writing_pad.eval.end_to_end_eval import (
     EndToEndCase,
     EndToEndCategoryMetrics,
@@ -39,6 +45,10 @@ __all__ = [
     "evaluate_correction_cases",
     "load_correction_cases",
     "normalize_for_eval",
+    "append_jsonl_record",
+    "build_end_to_end_case_record",
+    "stroke_groups_from_capture_payload",
+    "stroke_groups_to_jsonable",
     "EndToEndCase",
     "EndToEndCategoryMetrics",
     "EndToEndEvalReport",
