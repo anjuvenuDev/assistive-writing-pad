@@ -51,6 +51,12 @@ def main() -> int:
         help="Readiness evidence output path.",
     )
     parser.add_argument(
+        "--profile",
+        choices=["smoke", "production"],
+        default="production",
+        help="Return success for smoke readiness or full production readiness.",
+    )
+    parser.add_argument(
         "--min-correction-accuracy",
         type=float,
         default=0.98,
@@ -102,6 +108,8 @@ def main() -> int:
     args.output.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
     print_report(report)
     print(f"Wrote {args.output}")
+    if args.profile == "smoke":
+        return 0 if report.smoke_ready else 2
     return 0 if report.production_ready else 2
 
 

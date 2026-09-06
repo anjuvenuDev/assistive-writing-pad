@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-06T15:39:35.533200+00:00",
+  "generated_at": "2026-09-06T15:42:42.407256+00:00",
   "production_ready": false,
   "smoke_ready": true,
   "model_configuration": {
@@ -25,8 +25,8 @@
     "false_positives": 0,
     "false_positive_rate": 0.0,
     "missed_corrections": 0,
-    "average_latency_ms": 753.038,
-    "p95_latency_ms": 898.986,
+    "average_latency_ms": 695.458,
+    "p95_latency_ms": 828.258,
     "by_category": {
       "clean": {
         "total": 2,
@@ -35,8 +35,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 662.332,
-        "p95_latency_ms": 684.202
+        "average_latency_ms": 610.365,
+        "p95_latency_ms": 630.109
       },
       "grammar": {
         "total": 3,
@@ -45,8 +45,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 749.996,
-        "p95_latency_ms": 824.607
+        "average_latency_ms": 690.99,
+        "p95_latency_ms": 758.477
       },
       "mixed": {
         "total": 1,
@@ -55,8 +55,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 594.49,
-        "p95_latency_ms": 594.49
+        "average_latency_ms": 546.972,
+        "p95_latency_ms": 546.972
       },
       "semantic": {
         "total": 6,
@@ -65,8 +65,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 811.218,
-        "p95_latency_ms": 934.423
+        "average_latency_ms": 750.804,
+        "p95_latency_ms": 864.881
       }
     }
   },
@@ -80,8 +80,8 @@
     "average_corrected_cer": 0.0,
     "average_recognition_wer": 0.0,
     "average_corrected_wer": 0.0,
-    "average_total_latency_ms": 1741.97,
-    "p95_total_latency_ms": 1920.35,
+    "average_total_latency_ms": 1743.818,
+    "p95_total_latency_ms": 1935.105,
     "low_confidence": 0,
     "needs_review": 0,
     "by_category": {
@@ -95,8 +95,8 @@
         "average_corrected_cer": 0.0,
         "average_recognition_wer": 0.0,
         "average_corrected_wer": 0.0,
-        "average_total_latency_ms": 1741.97,
-        "p95_total_latency_ms": 1920.35,
+        "average_total_latency_ms": 1743.818,
+        "p95_total_latency_ms": 1935.105,
         "low_confidence": 0,
         "needs_review": 0
       }

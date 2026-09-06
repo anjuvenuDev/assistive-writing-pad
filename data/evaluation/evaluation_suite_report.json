@@ -1,0 +1,82 @@
+{
+  "profile": "smoke",
+  "passed": true,
+  "steps": [
+    {
+      "name": "correction",
+      "command": [
+        "/home/anj/Desktop/assistive writing pad/.venv/bin/python",
+        "scripts/evaluate_correction.py",
+        "--local-files-only",
+        "--max-p95-latency-ms",
+        "1200",
+        "--output",
+        "data/evaluation/correction_report.json"
+      ],
+      "returncode": 0,
+      "stdout": "Warming correction models before timed evaluation...\nCorrection evaluation\ncases: 12\nexact: 12/12 (100.0%)\nfalse positives: 0 (0.0% of clean cases)\nmissed corrections: 0\nlatency avg/p95: 695.5 / 828.3 ms\n\nBy category\n- clean: 2/2 (100.0%), avg 610.4 ms, p95 630.1 ms\n- grammar: 3/3 (100.0%), avg 691.0 ms, p95 758.5 ms\n- mixed: 1/1 (100.0%), avg 547.0 ms, p95 547.0 ms\n- semantic: 6/6 (100.0%), avg 750.8 ms, p95 864.9 ms\n\nWarm-up time: 3227.8 ms\nWrote data/evaluation/correction_report.json\n\nGate passed\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "end_to_end",
+      "command": [
+        "/home/anj/Desktop/assistive writing pad/.venv/bin/python",
+        "scripts/evaluate_end_to_end.py",
+        "--local-files-only",
+        "--mode",
+        "auto",
+        "--output",
+        "data/evaluation/end_to_end_report.json",
+        "--min-recognition-accuracy",
+        "1.0",
+        "--min-corrected-accuracy",
+        "1.0",
+        "--max-average-recognition-cer",
+        "0.0",
+        "--max-average-corrected-cer",
+        "0.0",
+        "--max-low-confidence",
+        "0",
+        "--max-needs-review",
+        "0",
+        "--max-p95-total-latency-ms",
+        "5000"
+      ],
+      "returncode": 0,
+      "stdout": "Warming OCR model before timed evaluation...\nWarming correction models before timed evaluation...\nEnd-to-end evaluation\ncases: 2\nrecognition exact: 2/2 (100.0%)\ncorrected exact: 2/2 (100.0%)\naverage recognition CER/WER: 0.0% / 0.0%\naverage corrected CER/WER: 0.0% / 0.0%\nlow confidence: 0\nneeds review: 0\ntotal latency avg/p95: 1743.8 / 1935.1 ms\n\nBy category\n- single_character: recognition 2/2 (100.0%), corrected 2/2 (100.0%), total avg 1743.8 ms, p95 1935.1 ms\n\nWarm-up time: 10515.3 ms\nWrote data/evaluation/end_to_end_report.json\n\nGate passed\n",
+      "stderr": "Some weights of VisionEncoderDecoderModel were not initialized from the model checkpoint at microsoft/trocr-base-handwritten and are newly initialized: ['encoder.pooler.dense.bias', 'encoder.pooler.dense.weight']\nYou should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.\nauto_crop: ink covers only 1.7% of the 768x256 image. Large whitespace may hurt OCR accuracy.\nauto_crop: ink covers only 0.7% of the 768x256 image. Large whitespace may hurt OCR accuracy.\n",
+      "passed": true
+    },
+    {
+      "name": "coverage_smoke",
+      "command": [
+        "/home/anj/Desktop/assistive writing pad/.venv/bin/python",
+        "scripts/check_evaluation_coverage.py",
+        "--profile",
+        "smoke",
+        "--output",
+        "data/evaluation/coverage_report.json"
+      ],
+      "returncode": 0,
+      "stdout": "Evaluation coverage (smoke)\ncases: 2\nmanual cases: 0\nby category:\n- single_character: 2\nby source:\n- smoke: 2\nrequirements:\n- pass: single_character.min_cases 2/2\n- pass: single_character.min_manual_cases 0/0\nWrote data/evaluation/coverage_report.json\n",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "readiness",
+      "command": [
+        "/home/anj/Desktop/assistive writing pad/.venv/bin/python",
+        "scripts/collect_evaluation_evidence.py",
+        "--profile",
+        "smoke",
+        "--output",
+        "data/evaluation/readiness_report.json"
+      ],
+      "returncode": 0,
+      "stdout": "Evaluation evidence\nsmoke ready: true\nproduction ready: false\nblocking findings:\n- coverage.production_profile: actual=False, expected=True\nWrote data/evaluation/readiness_report.json\n",
+      "stderr": "",
+      "passed": true
+    }
+  ]
+}

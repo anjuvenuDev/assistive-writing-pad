@@ -261,8 +261,8 @@ The current cached end-to-end baseline on this machine is:
 - average recognition CER/WER 0.0% / 0.0%
 - average corrected CER/WER 0.0% / 0.0%
 - 0 low-confidence cases and 0 review cases at threshold 0.65
-- average total latency 1742.0 ms, p95 total latency 1920.3 ms after warm-up
-- combined OCR plus correction model warm-up time 10501.4 ms
+- average total latency 1743.8 ms, p95 total latency 1935.1 ms after warm-up
+- combined OCR plus correction model warm-up time 10515.3 ms
 
 This gate caught and fixed a real integration issue where the grammar model
 rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
@@ -324,6 +324,15 @@ This command exits non-zero until the production coverage profile passes. It
 still writes the evidence report so blockers are auditable instead of hidden in
 terminal output.
 
+To force fresh model-backed reports before collecting evidence, run the suite:
+
+```bash
+.venv/bin/python scripts/run_evaluation_suite.py --profile smoke --output data/evaluation/evaluation_suite_report.json
+```
+
+Use `--profile production` only when the manifest has enough manual samples;
+otherwise it correctly fails at the production coverage step.
+
 ## Correction Evaluation
 
 Run the correction gate against the committed curated manifest:
@@ -340,8 +349,8 @@ The current cached HF correction baseline on this machine is:
 
 - 12/12 exact matches on the curated correction set
 - 0/2 false positives on clean text
-- average latency 753.0 ms, p95 latency 899.0 ms after model warm-up
-- correction model warm-up time 5950.7 ms
+- average latency 695.5 ms, p95 latency 828.3 ms after model warm-up
+- correction model warm-up time 3227.8 ms
 
 This is a small benchmark set, not a guarantee for all handwriting. The mixed
 spelling-plus-grammar case is now within the laptop gate, but Raspberry Pi
