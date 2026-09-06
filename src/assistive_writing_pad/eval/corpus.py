@@ -21,6 +21,7 @@ def build_end_to_end_case_record(
     expected: str,
     stroke_payload: Dict[str, Any],
     expected_recognized: Optional[str] = None,
+    source: str = "manual",
     notes: str = "",
 ) -> Dict[str, Any]:
     clean_case_id = validate_manifest_text("id", case_id)
@@ -34,6 +35,7 @@ def build_end_to_end_case_record(
     record: Dict[str, Any] = {
         "id": clean_case_id,
         "category": clean_category,
+        "source": validate_manifest_text("source", source),
         "expected": clean_expected,
         "strokes": stroke_groups_to_jsonable(stroke_groups),
     }

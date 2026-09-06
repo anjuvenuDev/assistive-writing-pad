@@ -1,0 +1,25 @@
+{
+  "total_cases": 2,
+  "manual_cases": 0,
+  "by_category": {
+    "single_character": 2
+  },
+  "by_source": {
+    "smoke": 2
+  },
+  "passed": true,
+  "findings": [
+    {
+      "requirement": "single_character.min_cases",
+      "actual": 2,
+      "expected": 2,
+      "passed": true
+    },
+    {
+      "requirement": "single_character.min_manual_cases",
+      "actual": 0,
+      "expected": 0,
+      "passed": true
+    }
+  ]
+}

@@ -261,8 +261,8 @@ The current cached end-to-end baseline on this machine is:
 - average recognition CER/WER 0.0% / 0.0%
 - average corrected CER/WER 0.0% / 0.0%
 - 0 low-confidence cases and 0 review cases at threshold 0.65
-- average total latency 1734.7 ms, p95 total latency 1924.1 ms after warm-up
-- combined OCR plus correction model warm-up time 12749.0 ms
+- average total latency 1747.1 ms, p95 total latency 1946.5 ms after warm-up
+- combined OCR plus correction model warm-up time 10540.8 ms
 
 This gate caught and fixed a real integration issue where the grammar model
 rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
@@ -289,6 +289,19 @@ JSON.stringify(window.assistiveWritingPad.exportStrokePayload())
 If the raw OCR target should intentionally differ from the corrected output,
 pass `--expected-recognized` as well. Every added case should then be run
 through `scripts/evaluate_end_to_end.py` before being committed.
+
+The coverage gate separates smoke verification from production readiness:
+
+```bash
+.venv/bin/python scripts/check_evaluation_coverage.py --profile smoke --output data/evaluation/coverage_report.json
+.venv/bin/python scripts/check_evaluation_coverage.py --profile production
+```
+
+The current manifest passes the smoke profile, but the production profile
+intentionally fails because it has only two smoke single-character cases and no
+manual word or sentence handwriting captures yet. Production readiness requires
+manual cases for `single_character`, `word`, and `sentence` categories before
+accuracy claims are meaningful.
 
 ## Correction Evaluation
 

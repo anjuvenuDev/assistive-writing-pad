@@ -16,6 +16,13 @@ from assistive_writing_pad.eval.corpus import (
     stroke_groups_from_capture_payload,
     stroke_groups_to_jsonable,
 )
+from assistive_writing_pad.eval.coverage import (
+    CategoryRequirement,
+    CoverageFinding,
+    CoverageReport,
+    evaluate_coverage,
+    requirements_for_profile,
+)
 from assistive_writing_pad.eval.end_to_end_eval import (
     EndToEndCase,
     EndToEndCategoryMetrics,
@@ -49,6 +56,11 @@ __all__ = [
     "build_end_to_end_case_record",
     "stroke_groups_from_capture_payload",
     "stroke_groups_to_jsonable",
+    "CategoryRequirement",
+    "CoverageFinding",
+    "CoverageReport",
+    "evaluate_coverage",
+    "requirements_for_profile",
     "EndToEndCase",
     "EndToEndCategoryMetrics",
     "EndToEndEvalReport",

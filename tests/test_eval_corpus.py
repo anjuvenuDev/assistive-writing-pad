@@ -28,6 +28,7 @@ def test_build_end_to_end_case_record_from_browser_payload() -> None:
     )
 
     assert record["id"] == "word_the_001"
+    assert record["source"] == "manual"
     assert record["expected"] == "the"
     assert record["expected_recognized"] == "teh"
     assert record["strokes"][0][0]["pressure"] == 0.5

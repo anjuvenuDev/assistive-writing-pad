@@ -21,6 +21,7 @@ data/*
 !data/examples/
 !data/examples/**
 !data/evaluation/
+!data/evaluation/coverage_report.json
 !data/evaluation/correction_cases.jsonl
 !data/evaluation/correction_report.json
 !data/evaluation/end_to_end_cases.jsonl

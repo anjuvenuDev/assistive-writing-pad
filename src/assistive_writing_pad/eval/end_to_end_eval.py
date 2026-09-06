@@ -45,6 +45,7 @@ class EndToEndCase:
     stroke_groups: Sequence[Sequence[StrokePoint]]
     category: str
     expected_recognized_text: Optional[str] = None
+    source: str = "unknown"
     notes: str = ""
 
 
@@ -52,6 +53,7 @@ class EndToEndCase:
 class EndToEndEvalRow:
     id: str
     category: str
+    source: str
     expected_recognized_text: str
     expected_corrected_text: str
     recognized_text: str
@@ -140,6 +142,7 @@ def load_end_to_end_cases(path: Path) -> List[EndToEndCase]:
                             if expected_recognized is not None
                             else expected_corrected
                         ),
+                        source=str(data.get("source", "unknown")),
                         stroke_groups=parse_stroke_groups(data["strokes"]),
                         notes=str(data.get("notes", "")),
                     )
@@ -186,6 +189,7 @@ def evaluate_end_to_end_cases(
             EndToEndEvalRow(
                 id=case.id,
                 category=case.category,
+                source=case.source,
                 expected_recognized_text=case.expected_recognized_text
                 or case.expected_corrected_text,
                 expected_corrected_text=case.expected_corrected_text,

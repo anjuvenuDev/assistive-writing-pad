@@ -53,6 +53,7 @@ def test_load_end_to_end_cases_from_jsonl(tmp_path) -> None:
             category="single_character",
             expected_corrected_text="i",
             expected_recognized_text="I",
+            source="unknown",
             stroke_groups=((StrokePoint(x=1.0, y=2.0, timestamp_ms=0, pressure=1.0),),),
         )
     ]
@@ -103,4 +104,5 @@ def test_evaluate_end_to_end_cases_summarizes_recognition_and_correction() -> No
     assert report.summary.low_confidence == 1
     assert report.summary.needs_review == 1
     assert report.summary.by_category["word"].corrected_exact == 1
+    assert report.rows[0].source == "unknown"
     assert [row.id for row in report.rows if not row.corrected_exact_match] == ["wrong"]
