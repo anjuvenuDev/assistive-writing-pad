@@ -286,6 +286,17 @@ class HuggingFaceCorrectionPipeline:
     def correct(self, text: str) -> CorrectionResult:
         if not text.strip():
             return CorrectionResult(original_text=text, corrected_text=text, confidence=1.0)
+        if is_isolated_character_input(text):
+            return CorrectionResult(
+                original_text=text,
+                corrected_text=text,
+                confidence=1.0,
+                metadata={
+                    "backend": "huggingface",
+                    "skipped": "isolated_character",
+                    "stages": "[]",
+                },
+            )
 
         current = text
         stages: List[Dict[str, object]] = []
@@ -395,6 +406,11 @@ def preserve_outer_whitespace(original: str, corrected: str) -> str:
     prefix = original[: len(original) - len(original.lstrip())]
     suffix = original[len(original.rstrip()) :]
     return f"{prefix}{normalize_generated_text(corrected)}{suffix}"
+
+
+def is_isolated_character_input(text: str) -> bool:
+    cleaned = normalize_generated_text(text)
+    return len(cleaned) == 1 and cleaned.isalpha()
 
 
 def is_acceptable_model_output(

@@ -241,6 +241,34 @@ cache loading, auto single-character routing, and the evaluation gate; it is not
 large enough to claim handwriting recognition accuracy for arbitrary words or
 sentences.
 
+## End-to-End Evaluation
+
+Run the complete stroke-to-correction gate against committed stroke fixtures:
+
+```bash
+AWP_TROCR_LOCAL_FILES_ONLY=1 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/evaluate_end_to_end.py --local-files-only --mode auto --output data/evaluation/end_to_end_report.json
+```
+
+Use `--min-recognition-accuracy`, `--min-corrected-accuracy`,
+`--max-average-recognition-cer`, `--max-average-corrected-cer`,
+`--max-low-confidence`, `--max-needs-review`, and
+`--max-p95-total-latency-ms` as release gates for the combined OCR plus
+correction path.
+
+The current cached end-to-end baseline on this machine is:
+
+- 2/2 exact recognition matches and 2/2 exact corrected matches
+- average recognition CER/WER 0.0% / 0.0%
+- average corrected CER/WER 0.0% / 0.0%
+- 0 low-confidence cases and 0 review cases at threshold 0.65
+- average total latency 2016.3 ms, p95 total latency 2227.4 ms after warm-up
+- combined OCR plus correction model warm-up time 13194.6 ms
+
+This gate caught and fixed a real integration issue where the grammar model
+rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
+fragments. The HF correction pipeline now preserves isolated character outputs
+unchanged and records that correction was skipped for `isolated_character`.
+
 ## Correction Evaluation
 
 Run the correction gate against the committed curated manifest:
@@ -257,8 +285,8 @@ The current cached HF correction baseline on this machine is:
 
 - 12/12 exact matches on the curated correction set
 - 0/2 false positives on clean text
-- average latency 840.5 ms, p95 latency 1144.3 ms after model warm-up
-- correction model warm-up time 5636.7 ms
+- average latency 753.0 ms, p95 latency 899.0 ms after model warm-up
+- correction model warm-up time 5950.7 ms
 
 This is a small benchmark set, not a guarantee for all handwriting. The mixed
 spelling-plus-grammar case is now within the laptop gate, but Raspberry Pi

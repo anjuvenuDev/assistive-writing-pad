@@ -23,6 +23,8 @@ data/*
 !data/evaluation/
 !data/evaluation/correction_cases.jsonl
 !data/evaluation/correction_report.json
+!data/evaluation/end_to_end_cases.jsonl
+!data/evaluation/end_to_end_report.json
 !data/evaluation/recognition_cases.jsonl
 !data/evaluation/recognition_report.json
 

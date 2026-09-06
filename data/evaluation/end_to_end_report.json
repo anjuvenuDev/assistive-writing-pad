@@ -1,0 +1,80 @@
+{
+  "summary": {
+    "total": 2,
+    "recognition_exact": 2,
+    "corrected_exact": 2,
+    "recognition_accuracy": 1.0,
+    "corrected_accuracy": 1.0,
+    "average_recognition_cer": 0.0,
+    "average_corrected_cer": 0.0,
+    "average_recognition_wer": 0.0,
+    "average_corrected_wer": 0.0,
+    "average_total_latency_ms": 2016.337,
+    "p95_total_latency_ms": 2227.397,
+    "low_confidence": 0,
+    "needs_review": 0,
+    "by_category": {
+      "single_character": {
+        "total": 2,
+        "recognition_exact": 2,
+        "corrected_exact": 2,
+        "recognition_accuracy": 1.0,
+        "corrected_accuracy": 1.0,
+        "average_recognition_cer": 0.0,
+        "average_corrected_cer": 0.0,
+        "average_recognition_wer": 0.0,
+        "average_corrected_wer": 0.0,
+        "average_total_latency_ms": 2016.337,
+        "p95_total_latency_ms": 2227.397,
+        "low_confidence": 0,
+        "needs_review": 0
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "single_h_001",
+      "category": "single_character",
+      "expected_recognized_text": "h",
+      "expected_corrected_text": "h",
+      "recognized_text": "h",
+      "corrected_text": "h",
+      "recognition_exact_match": true,
+      "corrected_exact_match": true,
+      "recognition_char_error_rate": 0.0,
+      "corrected_char_error_rate": 0.0,
+      "recognition_word_error_rate": 0.0,
+      "corrected_word_error_rate": 0.0,
+      "recognition_latency_ms": 1781.787,
+      "correction_latency_ms": 0.039,
+      "total_latency_ms": 1781.826,
+      "recognition_confidence": 0.8628,
+      "correction_confidence": 1.0,
+      "low_confidence": false,
+      "needs_review": false,
+      "correction_count": 0
+    },
+    {
+      "id": "single_i_001",
+      "category": "single_character",
+      "expected_recognized_text": "i",
+      "expected_corrected_text": "i",
+      "recognized_text": "i",
+      "corrected_text": "i",
+      "recognition_exact_match": true,
+      "corrected_exact_match": true,
+      "recognition_char_error_rate": 0.0,
+      "corrected_char_error_rate": 0.0,
+      "recognition_word_error_rate": 0.0,
+      "corrected_word_error_rate": 0.0,
+      "recognition_latency_ms": 2250.816,
+      "correction_latency_ms": 0.033,
+      "total_latency_ms": 2250.848,
+      "recognition_confidence": 0.8352,
+      "correction_confidence": 1.0,
+      "low_confidence": false,
+      "needs_review": false,
+      "correction_count": 0
+    }
+  ]
+}

@@ -7,6 +7,7 @@ from assistive_writing_pad.correction.huggingface import (
     ModelCorrectionUnavailable,
     diff_corrections,
     is_acceptable_model_output,
+    is_isolated_character_input,
     normalize_generated_text,
 )
 
@@ -114,6 +115,20 @@ def test_huggingface_pipeline_preserves_clean_text_when_models_agree() -> None:
     assert result.confidence == 1.0
 
 
+def test_huggingface_pipeline_skips_isolated_character_input() -> None:
+    grammar = FakeRunner(
+        stage="grammar",
+        outputs={"h": [generated("H.", 0.99, "grammar")]},
+    )
+
+    result = HuggingFaceCorrectionPipeline(grammar_runner=grammar).correct("h")
+
+    assert result.corrected_text == "h"
+    assert result.corrections == ()
+    assert result.confidence == 1.0
+    assert result.metadata["skipped"] == "isolated_character"
+
+
 def test_huggingface_pipeline_applies_semantic_stage_between_models() -> None:
     semantic = FakeRunner(
         stage="semantic",
@@ -204,6 +219,13 @@ def test_model_output_guard_rejects_unrelated_long_text() -> None:
         "I lik swiming",
         "This generated paragraph talks about something completely different.",
     )
+
+
+def test_isolated_character_input_detects_letters_only() -> None:
+    assert is_isolated_character_input(" h ")
+    assert not is_isolated_character_input("hi")
+    assert not is_isolated_character_input("1")
+    assert not is_isolated_character_input("?")
 
 
 def test_diff_corrections_formats_insertions_and_punctuation() -> None:
