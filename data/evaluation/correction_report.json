@@ -6,8 +6,8 @@
     "false_positives": 0,
     "false_positive_rate": 0.0,
     "missed_corrections": 0,
-    "average_latency_ms": 695.458,
-    "p95_latency_ms": 828.258,
+    "average_latency_ms": 810.786,
+    "p95_latency_ms": 1015.947,
     "by_category": {
       "clean": {
         "total": 2,
@@ -16,8 +16,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 610.365,
-        "p95_latency_ms": 630.109
+        "average_latency_ms": 668.287,
+        "p95_latency_ms": 688.739
       },
       "grammar": {
         "total": 3,
@@ -26,8 +26,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 690.99,
-        "p95_latency_ms": 758.477
+        "average_latency_ms": 762.909,
+        "p95_latency_ms": 839.696
       },
       "mixed": {
         "total": 1,
@@ -36,8 +36,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 546.972,
-        "p95_latency_ms": 546.972
+        "average_latency_ms": 985.605,
+        "p95_latency_ms": 985.605
       },
       "semantic": {
         "total": 6,
@@ -46,8 +46,8 @@
         "false_positives": 0,
         "false_positive_rate": 0.0,
         "missed_corrections": 0,
-        "average_latency_ms": 750.804,
-        "p95_latency_ms": 864.881
+        "average_latency_ms": 853.087,
+        "p95_latency_ms": 1008.611
       }
     }
   },
@@ -63,7 +63,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 546.972,
+      "latency_ms": 985.605,
       "confidence": 0.6276,
       "correction_count": 1
     },
@@ -78,7 +78,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 695.857,
+      "latency_ms": 778.878,
       "confidence": 0.97,
       "correction_count": 1
     },
@@ -93,8 +93,8 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 706.92,
-      "confidence": 0.8759,
+      "latency_ms": 789.354,
+      "confidence": 0.8327,
       "correction_count": 1
     },
     {
@@ -108,7 +108,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 901.044,
+      "latency_ms": 1053.031,
       "confidence": 0.97,
       "correction_count": 1
     },
@@ -123,7 +123,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 756.392,
+      "latency_ms": 875.35,
       "confidence": 0.97,
       "correction_count": 1
     },
@@ -138,7 +138,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 706.358,
+      "latency_ms": 768.688,
       "confidence": 0.8353,
       "correction_count": 1
     },
@@ -153,7 +153,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 738.253,
+      "latency_ms": 853.224,
       "confidence": 0.9697,
       "correction_count": 1
     },
@@ -168,7 +168,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 637.838,
+      "latency_ms": 705.151,
       "confidence": 0.7286,
       "correction_count": 1
     },
@@ -183,7 +183,7 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 666.427,
+      "latency_ms": 731.903,
       "confidence": 0.8221,
       "correction_count": 1
     },
@@ -198,8 +198,8 @@
       "changed": true,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 768.705,
-      "confidence": 0.712,
+      "latency_ms": 851.673,
+      "confidence": 0.6572,
       "correction_count": 4
     },
     {
@@ -213,7 +213,7 @@
       "changed": false,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 632.303,
+      "latency_ms": 691.011,
       "confidence": 1.0,
       "correction_count": 0
     },
@@ -228,7 +228,7 @@
       "changed": false,
       "false_positive": false,
       "missed_correction": false,
-      "latency_ms": 588.428,
+      "latency_ms": 645.564,
       "confidence": 1.0,
       "correction_count": 0
     }

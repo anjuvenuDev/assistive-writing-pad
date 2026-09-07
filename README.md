@@ -261,13 +261,48 @@ The current cached end-to-end baseline on this machine is:
 - average recognition CER/WER 0.0% / 0.0%
 - average corrected CER/WER 0.0% / 0.0%
 - 0 low-confidence cases and 0 review cases at threshold 0.65
-- average total latency 1743.8 ms, p95 total latency 1935.1 ms after warm-up
-- combined OCR plus correction model warm-up time 10515.3 ms
+- average total latency 2038.8 ms, p95 total latency 2251.5 ms after warm-up
+- combined OCR plus correction model warm-up time 13095.2 ms
 
 This gate caught and fixed a real integration issue where the grammar model
 rewrote isolated recognized letters such as `h` and `i` into punctuated sentence
 fragments. The HF correction pipeline now preserves isolated character outputs
 unchanged and records that correction was skipped for `isolated_character`.
+
+### Synthetic Penpal Stroke Benchmark
+
+The repo also includes a curated synthetic handwriting-stroke fixture imported
+from the Hugging Face `breitburg/penpal` Dataset Viewer. Penpal is useful for
+repeatable development because it stores generated pen strokes grouped by word,
+but it is not a replacement for manual child handwriting captures.
+
+Import or refresh the curated synthetic sample:
+
+```bash
+.venv/bin/python scripts/import_penpal_samples.py --replace --offset 0 --length 4 --max-sentence-cases 2 --max-word-cases 6
+```
+
+Run the synthetic end-to-end benchmark:
+
+```bash
+AWP_TROCR_LOCAL_FILES_ONLY=1 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1 .venv/bin/python scripts/evaluate_end_to_end.py --local-files-only --mode auto --manifest data/evaluation/penpal_end_to_end_cases.jsonl --output data/evaluation/penpal_end_to_end_report.json --min-recognition-accuracy 0.0 --min-corrected-accuracy 0.0 --max-p95-total-latency-ms 15000
+```
+
+The current cached synthetic Penpal benchmark on this machine is:
+
+- 8 synthetic stroke cases: 2 sentence cases and 6 word cases
+- raw TrOCR recognition exact: 3/8 (37.5%)
+- corrected output exact: 8/8 (100.0%)
+- average recognition CER/WER 17.9% / 91.7%
+- average corrected CER/WER 0.0% / 0.0%
+- average total latency 4248.3 ms, p95 total latency 10300.7 ms after warm-up
+
+This benchmark drove a correction-pipeline improvement: a `wordfreq` plus
+RapidFuzz lexical stage now repairs OCR token fragments such as `a nalyze`,
+`centra I`, and `i plea` before the Hugging Face spelling, semantic, and grammar
+models run. The spelling and grammar stages also reject unsafe punctuation-only,
+case-only, and valid-word rewrites so the pipeline does not turn clean OCR words
+into unrelated model generations.
 
 To add real word or sentence handwriting captures without adding more
 child-facing UI controls, enable evaluator capture mode:
@@ -349,8 +384,8 @@ The current cached HF correction baseline on this machine is:
 
 - 12/12 exact matches on the curated correction set
 - 0/2 false positives on clean text
-- average latency 695.5 ms, p95 latency 828.3 ms after model warm-up
-- correction model warm-up time 3227.8 ms
+- average latency 810.8 ms, p95 latency 1015.9 ms after model warm-up
+- correction model warm-up time 4425.2 ms
 
 This is a small benchmark set, not a guarantee for all handwriting. The mixed
 spelling-plus-grammar case is now within the laptop gate, but Raspberry Pi

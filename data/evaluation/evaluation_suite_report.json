@@ -14,7 +14,7 @@
         "data/evaluation/correction_report.json"
       ],
       "returncode": 0,
-      "stdout": "Warming correction models before timed evaluation...\nCorrection evaluation\ncases: 12\nexact: 12/12 (100.0%)\nfalse positives: 0 (0.0% of clean cases)\nmissed corrections: 0\nlatency avg/p95: 695.5 / 828.3 ms\n\nBy category\n- clean: 2/2 (100.0%), avg 610.4 ms, p95 630.1 ms\n- grammar: 3/3 (100.0%), avg 691.0 ms, p95 758.5 ms\n- mixed: 1/1 (100.0%), avg 547.0 ms, p95 547.0 ms\n- semantic: 6/6 (100.0%), avg 750.8 ms, p95 864.9 ms\n\nWarm-up time: 3227.8 ms\nWrote data/evaluation/correction_report.json\n\nGate passed\n",
+      "stdout": "Warming correction models before timed evaluation...\nCorrection evaluation\ncases: 12\nexact: 12/12 (100.0%)\nfalse positives: 0 (0.0% of clean cases)\nmissed corrections: 0\nlatency avg/p95: 810.8 / 1015.9 ms\n\nBy category\n- clean: 2/2 (100.0%), avg 668.3 ms, p95 688.7 ms\n- grammar: 3/3 (100.0%), avg 762.9 ms, p95 839.7 ms\n- mixed: 1/1 (100.0%), avg 985.6 ms, p95 985.6 ms\n- semantic: 6/6 (100.0%), avg 853.1 ms, p95 1008.6 ms\n\nWarm-up time: 4425.2 ms\nWrote data/evaluation/correction_report.json\n\nGate passed\n",
       "stderr": "",
       "passed": true
     },
@@ -44,7 +44,7 @@
         "5000"
       ],
       "returncode": 0,
-      "stdout": "Warming OCR model before timed evaluation...\nWarming correction models before timed evaluation...\nEnd-to-end evaluation\ncases: 2\nrecognition exact: 2/2 (100.0%)\ncorrected exact: 2/2 (100.0%)\naverage recognition CER/WER: 0.0% / 0.0%\naverage corrected CER/WER: 0.0% / 0.0%\nlow confidence: 0\nneeds review: 0\ntotal latency avg/p95: 1743.8 / 1935.1 ms\n\nBy category\n- single_character: recognition 2/2 (100.0%), corrected 2/2 (100.0%), total avg 1743.8 ms, p95 1935.1 ms\n\nWarm-up time: 10515.3 ms\nWrote data/evaluation/end_to_end_report.json\n\nGate passed\n",
+      "stdout": "Warming OCR model before timed evaluation...\nWarming correction models before timed evaluation...\nEnd-to-end evaluation\ncases: 2\nrecognition exact: 2/2 (100.0%)\ncorrected exact: 2/2 (100.0%)\naverage recognition CER/WER: 0.0% / 0.0%\naverage corrected CER/WER: 0.0% / 0.0%\nlow confidence: 0\nneeds review: 0\ntotal latency avg/p95: 2038.8 / 2251.5 ms\n\nBy category\n- single_character: recognition 2/2 (100.0%), corrected 2/2 (100.0%), total avg 2038.8 ms, p95 2251.5 ms\n\nWarm-up time: 13095.2 ms\nWrote data/evaluation/end_to_end_report.json\n\nGate passed\n",
       "stderr": "Some weights of VisionEncoderDecoderModel were not initialized from the model checkpoint at microsoft/trocr-base-handwritten and are newly initialized: ['encoder.pooler.dense.bias', 'encoder.pooler.dense.weight']\nYou should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.\nauto_crop: ink covers only 1.7% of the 768x256 image. Large whitespace may hurt OCR accuracy.\nauto_crop: ink covers only 0.7% of the 768x256 image. Large whitespace may hurt OCR accuracy.\n",
       "passed": true
     },

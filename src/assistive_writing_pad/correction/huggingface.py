@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import difflib
+from functools import lru_cache
 import json
 import logging
 import math
@@ -12,6 +13,8 @@ from pathlib import Path
 import re
 import time
 from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+
+from rapidfuzz.distance import Levenshtein
 
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import Correction, CorrectionResult
@@ -36,6 +39,8 @@ MODEL_TOKENIZERS: Mapping[str, str] = {
 
 TEXT_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?|[^\w\s]", re.ASCII)
 WORD_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?$", re.ASCII)
+TERMINAL_PUNCTUATION_RE = re.compile(r"[.!?,:;]+$", re.ASCII)
+TRAILING_QUOTE_ARTIFACT_RE = re.compile(r"""['"`]+[.!?,:;]?$""", re.ASCII)
 
 
 class ModelCorrectionUnavailable(RuntimeError):
@@ -215,6 +220,7 @@ class HFSeq2SeqCorrectionRunner:
 class HuggingFaceCorrectionPipeline:
     """Model pipeline: spelling, semantic real-word correction, then GEC."""
 
+    lexical_runner: Optional[CorrectionModelRunner] = None
     spelling_runner: Optional[CorrectionModelRunner] = None
     semantic_runner: Optional[CorrectionModelRunner] = None
     grammar_runner: Optional[CorrectionModelRunner] = None
@@ -234,6 +240,7 @@ class HuggingFaceCorrectionPipeline:
             "max_new_tokens": settings.hf_correction_max_new_tokens,
         }
         spelling_runner: Optional[CorrectionModelRunner] = None
+        lexical_runner: Optional[CorrectionModelRunner] = WordfreqFragmentCorrectionRunner()
         semantic_runner: Optional[CorrectionModelRunner] = None
         grammar_runner: Optional[CorrectionModelRunner] = None
 
@@ -270,6 +277,7 @@ class HuggingFaceCorrectionPipeline:
             )
 
         return cls(
+            lexical_runner=lexical_runner,
             spelling_runner=spelling_runner,
             semantic_runner=semantic_runner,
             grammar_runner=grammar_runner,
@@ -305,6 +313,18 @@ class HuggingFaceCorrectionPipeline:
 
         for runner in self._active_runners():
             before = current
+            if is_single_word_fragment_input(before) and runner.stage != "spelling":
+                stages.append(
+                    {
+                        "stage": runner.stage,
+                        "model": runner.model_name,
+                        "input": before,
+                        "accepted": False,
+                        "skipped": "single_word_fragment",
+                        "alternatives": [],
+                    }
+                )
+                continue
             try:
                 generations = list(runner.generate(before))
             except ModelCorrectionUnavailable as exc:
@@ -321,8 +341,17 @@ class HuggingFaceCorrectionPipeline:
             accepted = [
                 item
                 for item in generations
-                if self._accept_generation(before, item.text, item.confidence)
+                if self._accept_generation(
+                    before,
+                    item.text,
+                    item.confidence,
+                    stage=runner.stage,
+                )
             ]
+            accepted.sort(
+                key=lambda item: self._generation_rank_score(before, item),
+                reverse=True,
+            )
             stage_record = {
                 "stage": runner.stage,
                 "model": runner.model_name,
@@ -338,7 +367,10 @@ class HuggingFaceCorrectionPipeline:
             }
             if accepted:
                 best = accepted[0]
-                current = preserve_outer_whitespace(before, best.text)
+                best_text = best.text
+                if runner.stage == "grammar":
+                    best_text = finalize_grammar_output(before, best_text)
+                current = preserve_outer_whitespace(before, best_text)
                 if normalize_generated_text(current) != normalize_generated_text(before):
                     applied.append(best)
                     stage_record["output"] = current
@@ -365,21 +397,57 @@ class HuggingFaceCorrectionPipeline:
     def _active_runners(self) -> Tuple[CorrectionModelRunner, ...]:
         runners: List[CorrectionModelRunner] = []
         if self.spelling_runner is not None:
+            if self.lexical_runner is not None:
+                runners.append(self.lexical_runner)
             runners.append(self.spelling_runner)
+        elif self.lexical_runner is not None:
+            runners.append(self.lexical_runner)
         if self.semantic_runner is not None:
             runners.append(self.semantic_runner)
         if self.grammar_runner is not None:
             runners.append(self.grammar_runner)
         return tuple(runners)
 
-    def _accept_generation(self, original: str, candidate: str, confidence: float) -> bool:
+    def _accept_generation(
+        self,
+        original: str,
+        candidate: str,
+        confidence: float,
+        *,
+        stage: str = "",
+    ) -> bool:
         if confidence < self.min_generation_confidence:
+            return False
+        if normalize_generated_text(original) == normalize_generated_text(candidate):
+            return True
+        if is_word_or_ocr_fragment_input(original) and not is_word_or_ocr_fragment_output(
+            candidate
+        ):
+            return False
+        if is_unrequested_punctuation_or_case_only_change(original, candidate):
+            return False
+        if stage == "spelling" and not is_probable_spelling_change(original, candidate):
             return False
         return is_acceptable_model_output(
             original,
             candidate,
             max_change_ratio=self.max_change_ratio,
         )
+
+    def _generation_rank_score(self, original: str, candidate: GeneratedCorrection) -> float:
+        score = candidate.confidence
+        original_tokens = normalized_word_tokens(original)
+        candidate_tokens = normalized_word_tokens(candidate.text)
+        if original_tokens and candidate_tokens:
+            score -= token_change_ratio(original_tokens, candidate_tokens) * 0.08
+
+        if has_trailing_quote_artifact(original):
+            terminal = terminal_punctuation(candidate.text)
+            if terminal == ".":
+                score += 0.14
+            elif terminal in {",", ":", ";"}:
+                score -= 0.16
+        return score
 
 
 def prompt_for_model(model_name: str, fallback: str) -> str:
@@ -395,11 +463,197 @@ def resolve_device(device: str, torch: object) -> str:
     return "cpu"
 
 
+@dataclass
+class WordfreqFragmentCorrectionRunner:
+    """Repair OCR token fragments using word-frequency and edit-distance scoring."""
+
+    stage: str = "lexical"
+    model_name: str = "wordfreq-en-zipf-rapidfuzz"
+    language: str = "en"
+    top_n: int = 100000
+    min_zipf: float = 3.0
+    min_margin: float = 0.05
+    distance_penalty: float = 0.60
+
+    def generate(self, text: str) -> Sequence[GeneratedCorrection]:
+        corrected = repair_ocr_fragments(
+            text,
+            language=self.language,
+            top_n=self.top_n,
+            min_zipf=self.min_zipf,
+            min_margin=self.min_margin,
+            distance_penalty=self.distance_penalty,
+        )
+        if corrected == text:
+            return ()
+        return (
+            GeneratedCorrection(
+                text=corrected,
+                confidence=0.78,
+                model_name=self.model_name,
+                stage=self.stage,
+            ),
+        )
+
+
 def normalize_generated_text(text: str) -> str:
     cleaned = " ".join(text.strip().split())
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
     cleaned = re.sub(r"([({\[])\s+", r"\1", cleaned)
     return cleaned
+
+
+def repair_ocr_fragments(
+    text: str,
+    *,
+    language: str = "en",
+    top_n: int = 100000,
+    min_zipf: float = 3.0,
+    min_margin: float = 0.05,
+    distance_penalty: float = 0.60,
+) -> str:
+    tokens = TEXT_TOKEN_RE.findall(text)
+    if len([token for token in tokens if WORD_RE.match(token)]) < 2:
+        return text
+
+    repaired: List[str] = []
+    changed = False
+    index = 0
+    while index < len(tokens):
+        current = tokens[index]
+        if index + 1 >= len(tokens):
+            repaired.append(current)
+            break
+        next_token = tokens[index + 1]
+        if not WORD_RE.match(current) or not WORD_RE.match(next_token):
+            repaired.append(current)
+            index += 1
+            continue
+
+        candidate = best_fragment_merge_candidate(
+            current,
+            next_token,
+            language=language,
+            top_n=top_n,
+            min_zipf=min_zipf,
+            min_margin=min_margin,
+            distance_penalty=distance_penalty,
+        )
+        if candidate is None:
+            repaired.append(current)
+            index += 1
+            continue
+        repaired.append(_preserve_fragment_case(current, next_token, candidate))
+        changed = True
+        index += 2
+
+    if not changed:
+        return text
+    return normalize_generated_text(" ".join(repaired))
+
+
+def best_fragment_merge_candidate(
+    left: str,
+    right: str,
+    *,
+    language: str,
+    top_n: int,
+    min_zipf: float,
+    min_margin: float,
+    distance_penalty: float,
+) -> Optional[str]:
+    left_word = left.lower()
+    right_word = right.lower()
+    if not should_consider_fragment_merge(left_word, right_word, language=language):
+        return None
+
+    compact = f"{left_word}{right_word}"
+    candidate_scores: Dict[str, float] = {}
+    for candidate in direct_fragment_candidates(left_word, right_word):
+        frequency = zipf_frequency(candidate, language)
+        if frequency >= min_zipf:
+            distance = Levenshtein.distance(compact, candidate)
+            candidate_scores[candidate] = frequency - (distance * distance_penalty)
+
+    max_distance = 2 if len(compact) <= 7 else 3
+    for word in frequent_words(language, top_n):
+        if abs(len(word) - len(compact)) > max_distance:
+            continue
+        distance = Levenshtein.distance(compact, word)
+        if distance > max_distance:
+            continue
+        frequency = zipf_frequency(word, language)
+        if frequency < min_zipf:
+            continue
+        score = frequency - (distance * distance_penalty)
+        existing = candidate_scores.get(word)
+        if existing is None or score > existing:
+            candidate_scores[word] = score
+
+    if not candidate_scores:
+        return None
+
+    best, best_score = max(candidate_scores.items(), key=lambda item: (item[1], item[0]))
+    original_score = zipf_frequency(f"{left_word} {right_word}", language)
+    if best_score < original_score + min_margin:
+        return None
+    return best
+
+
+def should_consider_fragment_merge(left: str, right: str, *, language: str) -> bool:
+    if len(left) + len(right) < 4:
+        return False
+    left_frequency = zipf_frequency(left, language)
+    right_frequency = zipf_frequency(right, language)
+    if left_frequency == 0.0 or right_frequency == 0.0:
+        return True
+    if len(left) == 1 or len(right) == 1:
+        other_frequency = right_frequency if len(left) == 1 else left_frequency
+        if other_frequency >= 4.5:
+            return False
+        return True
+    return False
+
+
+def direct_fragment_candidates(left: str, right: str) -> Sequence[str]:
+    compact = f"{left}{right}"
+    candidates = {compact}
+    if right in {"i", "l", "1"}:
+        candidates.add(f"{left}l")
+    if left in {"i", "l", "1"}:
+        candidates.add(f"i{right}")
+    return tuple(candidates)
+
+
+@lru_cache(maxsize=8)
+def frequent_words(language: str, top_n: int) -> Tuple[str, ...]:
+    try:
+        from wordfreq import top_n_list
+    except ImportError as exc:  # pragma: no cover - dependency is declared.
+        raise ModelCorrectionUnavailable("wordfreq is not installed") from exc
+
+    words = [
+        word
+        for word in top_n_list(language, top_n)
+        if word.isalpha() and 3 <= len(word) <= 18
+    ]
+    return tuple(words)
+
+
+def zipf_frequency(word: str, language: str) -> float:
+    try:
+        from wordfreq import zipf_frequency as score
+    except ImportError as exc:  # pragma: no cover - dependency is declared.
+        raise ModelCorrectionUnavailable("wordfreq is not installed") from exc
+    return float(score(word, language))
+
+
+def _preserve_fragment_case(left: str, right: str, candidate: str) -> str:
+    if left[:1].isupper() and not right.isupper():
+        return candidate.capitalize()
+    if left.isupper() and right.isupper():
+        return candidate.upper()
+    return candidate
 
 
 def preserve_outer_whitespace(original: str, corrected: str) -> str:
@@ -411,6 +665,141 @@ def preserve_outer_whitespace(original: str, corrected: str) -> str:
 def is_isolated_character_input(text: str) -> bool:
     cleaned = normalize_generated_text(text)
     return len(cleaned) == 1 and cleaned.isalpha()
+
+
+def is_single_word_fragment_input(text: str) -> bool:
+    cleaned = normalize_generated_text(text)
+    return bool(WORD_RE.match(cleaned))
+
+
+def is_word_or_ocr_fragment_input(text: str) -> bool:
+    tokens = normalized_word_tokens(text)
+    cleaned = normalize_generated_text(text)
+    return bool(tokens) and len(tokens) <= 2 and not any(char in ".,!?;:" for char in cleaned)
+
+
+def is_word_or_ocr_fragment_output(text: str) -> bool:
+    tokens = normalized_word_tokens(text)
+    cleaned = normalize_generated_text(text)
+    if not tokens:
+        return False
+    if len(tokens) > 1:
+        return False
+    if any(char in ".,!?;:" for char in cleaned):
+        return False
+    return True
+
+
+def is_unrequested_punctuation_or_case_only_change(original: str, candidate: str) -> bool:
+    cleaned_original = normalize_generated_text(original)
+    cleaned_candidate = normalize_generated_text(candidate)
+    if not cleaned_original or not cleaned_candidate:
+        return False
+
+    original_tokens = normalized_word_tokens(cleaned_original)
+    candidate_tokens = normalized_word_tokens(cleaned_candidate)
+    if original_tokens != candidate_tokens:
+        return False
+
+    if cleaned_original.lower() == cleaned_candidate.lower():
+        return True
+
+    if has_trailing_quote_artifact(cleaned_original):
+        return False
+
+    original_without_terminal = TERMINAL_PUNCTUATION_RE.sub("", cleaned_original)
+    candidate_without_terminal = TERMINAL_PUNCTUATION_RE.sub("", cleaned_candidate)
+    return candidate_without_terminal.lower() == original_without_terminal.lower()
+
+
+def has_terminal_punctuation(text: str) -> bool:
+    cleaned = normalize_generated_text(text)
+    return bool(cleaned) and cleaned[-1] in ".!?,:;"
+
+
+def has_trailing_quote_artifact(text: str) -> bool:
+    return bool(TRAILING_QUOTE_ARTIFACT_RE.search(normalize_generated_text(text)))
+
+
+def terminal_punctuation(text: str) -> str:
+    cleaned = normalize_generated_text(text)
+    if not cleaned:
+        return ""
+    if cleaned[-1] in ".!?,:;":
+        return cleaned[-1]
+    return ""
+
+
+def finalize_grammar_output(original: str, candidate: str) -> str:
+    cleaned_candidate = normalize_generated_text(candidate)
+    if terminal_punctuation(cleaned_candidate):
+        return candidate
+    if has_trailing_quote_artifact(original):
+        return candidate
+
+    original_tokens = normalized_word_tokens(original)
+    candidate_tokens = normalized_word_tokens(cleaned_candidate)
+    if len(candidate_tokens) < 4:
+        return candidate
+    if token_change_ratio(original_tokens, candidate_tokens) <= 0.0:
+        return candidate
+    return f"{cleaned_candidate}."
+
+
+def is_probable_spelling_change(
+    original: str,
+    candidate: str,
+    *,
+    language: str = "en",
+) -> bool:
+    original_tokens = normalized_word_tokens(original)
+    candidate_tokens = normalized_word_tokens(candidate)
+    if not original_tokens or not candidate_tokens:
+        return True
+    if original_tokens == candidate_tokens:
+        return True
+    if len(original_tokens) != len(candidate_tokens):
+        return False
+
+    matcher = difflib.SequenceMatcher(
+        a=original_tokens,
+        b=candidate_tokens,
+        autojunk=False,
+    )
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag != "replace" or (left_end - left_start) != (right_end - right_start):
+            return False
+        for source, target in zip(
+            original_tokens[left_start:left_end],
+            candidate_tokens[right_start:right_end],
+        ):
+            if not is_probable_word_spelling_change(source, target, language=language):
+                return False
+    return True
+
+
+def is_probable_word_spelling_change(
+    source: str,
+    target: str,
+    *,
+    language: str,
+) -> bool:
+    if source == target:
+        return True
+    distance = Levenshtein.distance(source, target)
+    max_distance = max(2, math.ceil(len(source) * 0.35))
+    if distance > max_distance:
+        return False
+
+    source_frequency = zipf_frequency(source, language)
+    target_frequency = zipf_frequency(target, language)
+    if target_frequency < source_frequency + 0.35:
+        return False
+    if source_frequency >= 4.5:
+        return False
+    return True
 
 
 def is_acceptable_model_output(
@@ -516,6 +905,8 @@ def reason_for_applied_stages(applied: Sequence[GeneratedCorrection]) -> str:
         return "hf_grammar_model"
     if stages == {"semantic"}:
         return "hf_semantic_model"
+    if stages == {"lexical"}:
+        return "wordfreq_fragment_model"
     if stages:
         return "hf_model_pipeline"
     return "hf_model_pipeline"

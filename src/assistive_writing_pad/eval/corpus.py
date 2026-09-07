@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Dict, Optional, Sequence
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from assistive_writing_pad.contracts import StrokePoint
 from assistive_writing_pad.eval.recognition_eval import parse_stroke_groups
@@ -79,3 +81,136 @@ def validate_manifest_text(field: str, value: str) -> str:
     if not cleaned:
         raise ValueError(f"{field} must not be empty")
     return cleaned
+
+
+def penpal_rows_url(*, offset: int = 0, length: int = 20) -> str:
+    query = urlencode(
+        {
+            "dataset": "breitburg/penpal",
+            "config": "default",
+            "split": "train",
+            "offset": offset,
+            "length": length,
+        }
+    )
+    return f"https://datasets-server.huggingface.co/rows?{query}"
+
+
+def fetch_penpal_rows(*, offset: int = 0, length: int = 20, timeout: float = 30.0) -> Sequence[Dict[str, Any]]:
+    with urlopen(penpal_rows_url(offset=offset, length=length), timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    rows = payload.get("rows", [])
+    if not isinstance(rows, list):
+        raise ValueError("Penpal Dataset Viewer response did not contain rows")
+    return rows
+
+
+def build_penpal_case_records(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    max_sentence_cases: int,
+    max_word_cases: int,
+) -> Sequence[Dict[str, Any]]:
+    records = []
+    sentence_count = 0
+    word_count = 0
+    for row in rows:
+        raw = row.get("row", {})
+        if not isinstance(raw, dict):
+            continue
+        text = validate_manifest_text("text", str(raw.get("text", "")))
+        word_groups = raw.get("strokes")
+        if not isinstance(word_groups, list):
+            continue
+        file_id = str(raw.get("file", row.get("row_idx", "unknown")))[:12]
+
+        if sentence_count < max_sentence_cases:
+            records.append(
+                {
+                    "id": f"penpal_sentence_{file_id}",
+                    "category": "sentence",
+                    "source": "hf_penpal_synthetic",
+                    "expected": text,
+                    "expected_recognized": text,
+                    "strokes": penpal_word_groups_to_strokes(
+                        word_groups,
+                        expected_words=text.split(),
+                    ),
+                    "notes": "Synthetic Hugging Face Penpal stroke sample.",
+                }
+            )
+            sentence_count += 1
+
+        if word_count < max_word_cases:
+            words = text.split()
+            for index, word in enumerate(words):
+                if index >= len(word_groups):
+                    break
+                if not word or not any(char.isalnum() for char in word):
+                    continue
+                records.append(
+                    {
+                        "id": f"penpal_word_{file_id}_{index}",
+                        "category": "word",
+                        "source": "hf_penpal_synthetic",
+                        "expected": word,
+                        "expected_recognized": word,
+                        "strokes": penpal_word_groups_to_strokes(
+                            [word_groups[index]],
+                            expected_words=[word],
+                        ),
+                        "notes": "Synthetic Hugging Face Penpal word-level stroke sample.",
+                    }
+                )
+                word_count += 1
+                if word_count >= max_word_cases:
+                    break
+
+        if sentence_count >= max_sentence_cases and word_count >= max_word_cases:
+            break
+    return tuple(records)
+
+
+def penpal_word_groups_to_strokes(
+    word_groups: Sequence[object],
+    *,
+    expected_words: Optional[Sequence[str]] = None,
+) -> Sequence[Sequence[Dict[str, float]]]:
+    strokes = []
+    timestamp_ms = 0
+    for word_index, word_group in enumerate(word_groups):
+        if not isinstance(word_group, list):
+            continue
+        expected_word = expected_words[word_index] if expected_words and word_index < len(expected_words) else ""
+        for stroke in word_group:
+            if not isinstance(stroke, dict):
+                continue
+            points = stroke.get("points", [])
+            if not isinstance(points, list) or not points:
+                continue
+            if is_penpal_artifact_stroke(points, expected_word=expected_word):
+                continue
+            converted = []
+            for point in points:
+                if not isinstance(point, dict):
+                    continue
+                converted.append(
+                    {
+                        "x": float(point["x"]),
+                        "y": float(point["y"]),
+                        "timestamp_ms": timestamp_ms,
+                        "pressure": 1.0,
+                    }
+                )
+                timestamp_ms += 8
+            if converted:
+                strokes.append(tuple(converted))
+            timestamp_ms += 24
+        timestamp_ms += 120
+    return tuple(strokes)
+
+
+def is_penpal_artifact_stroke(points: Sequence[object], *, expected_word: str) -> bool:
+    if len(points) > 1:
+        return False
+    return not any(char in expected_word.lower() for char in "ij!?:;.")

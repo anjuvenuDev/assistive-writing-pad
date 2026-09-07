@@ -5,10 +5,17 @@ from assistive_writing_pad.correction.huggingface import (
     GeneratedCorrection,
     HuggingFaceCorrectionPipeline,
     ModelCorrectionUnavailable,
+    WordfreqFragmentCorrectionRunner,
+    best_fragment_merge_candidate,
     diff_corrections,
+    finalize_grammar_output,
     is_acceptable_model_output,
     is_isolated_character_input,
+    is_probable_word_spelling_change,
+    is_single_word_fragment_input,
+    is_word_or_ocr_fragment_output,
     normalize_generated_text,
+    repair_ocr_fragments,
 )
 
 
@@ -58,6 +65,15 @@ def generated(text: str, confidence: float, stage: str, model: str = "fake-model
 
 
 def test_huggingface_pipeline_applies_spelling_then_grammar() -> None:
+    lexical = FakeRunner(
+        stage="lexical",
+        model_name="lexical-model",
+        outputs={
+            "teh chlid writng": [
+                generated("teh chlid writng", 0.99, "lexical", "lexical-model")
+            ]
+        },
+    )
     spelling = FakeRunner(
         stage="spelling",
         model_name="spelling-model",
@@ -79,6 +95,7 @@ def test_huggingface_pipeline_applies_spelling_then_grammar() -> None:
     )
 
     result = HuggingFaceCorrectionPipeline(
+        lexical_runner=lexical,
         spelling_runner=spelling,
         grammar_runner=grammar,
     ).correct("teh chlid writng")
@@ -95,10 +112,11 @@ def test_huggingface_pipeline_applies_spelling_then_grammar() -> None:
 
     stages = json.loads(result.metadata["stages"])
     assert [(item["stage"], item["accepted"]) for item in stages] == [
+        ("lexical", True),
         ("spelling", True),
         ("grammar", True),
     ]
-    assert stages[0]["alternatives"][0]["text"] == "the child writing"
+    assert stages[1]["alternatives"][0]["text"] == "the child writing"
 
 
 def test_huggingface_pipeline_preserves_clean_text_when_models_agree() -> None:
@@ -115,6 +133,47 @@ def test_huggingface_pipeline_preserves_clean_text_when_models_agree() -> None:
     assert result.confidence == 1.0
 
 
+def test_huggingface_pipeline_rejects_unrequested_punctuation_only_change() -> None:
+    spelling = FakeRunner(
+        stage="spelling",
+        outputs={
+            "Please analyze the central idea conveyed": [
+                generated(
+                    "Please analyze the central idea conveyed.",
+                    0.99,
+                    "spelling",
+                )
+            ]
+        },
+    )
+
+    result = HuggingFaceCorrectionPipeline(spelling_runner=spelling).correct(
+        "Please analyze the central idea conveyed"
+    )
+
+    assert result.corrected_text == "Please analyze the central idea conveyed"
+    assert result.corrections == ()
+    assert json.loads(result.metadata["stages"])[0]["accepted"] is False
+
+
+def test_huggingface_pipeline_prefers_period_for_trailing_quote_artifact() -> None:
+    grammar = FakeRunner(
+        stage="grammar",
+        outputs={
+            "By this text '.": [
+                generated("By this text:", 0.57, "grammar"),
+                generated("By this text.", 0.48, "grammar"),
+            ]
+        },
+    )
+
+    result = HuggingFaceCorrectionPipeline(grammar_runner=grammar).correct("By this text '.")
+
+    assert result.corrected_text == "By this text."
+    stages = json.loads(result.metadata["stages"])
+    assert stages[0]["accepted"] is True
+
+
 def test_huggingface_pipeline_skips_isolated_character_input() -> None:
     grammar = FakeRunner(
         stage="grammar",
@@ -127,6 +186,91 @@ def test_huggingface_pipeline_skips_isolated_character_input() -> None:
     assert result.corrections == ()
     assert result.confidence == 1.0
     assert result.metadata["skipped"] == "isolated_character"
+
+
+def test_huggingface_pipeline_uses_spelling_only_for_single_word_fragments() -> None:
+    spelling = FakeRunner(
+        stage="spelling",
+        outputs={"teh": [generated("the", 0.91, "spelling")]},
+    )
+    grammar = FakeRunner(
+        stage="grammar",
+        outputs={"the": [generated("The.", 0.99, "grammar")]},
+    )
+
+    result = HuggingFaceCorrectionPipeline(
+        spelling_runner=spelling,
+        grammar_runner=grammar,
+    ).correct("teh")
+
+    assert result.corrected_text == "the"
+    stages = json.loads(result.metadata["stages"])
+    assert stages[0]["accepted"] is True
+    assert stages[1]["skipped"] == "single_word_fragment"
+
+
+def test_huggingface_pipeline_repairs_ocr_fragments_before_spelling() -> None:
+    spelling = FakeRunner(stage="spelling", outputs={})
+
+    result = HuggingFaceCorrectionPipeline(
+        lexical_runner=WordfreqFragmentCorrectionRunner(),
+        spelling_runner=spelling,
+    ).correct("a nalyze")
+
+    assert result.corrected_text == "analyze"
+    assert result.corrections[0].reason == "wordfreq_fragment_model"
+
+
+def test_huggingface_pipeline_rejects_sentence_output_for_ocr_word_fragment() -> None:
+    spelling = FakeRunner(
+        stage="spelling",
+        outputs={"a nalyze": [generated("A smile.", 0.91, "spelling")]},
+    )
+
+    result = HuggingFaceCorrectionPipeline(spelling_runner=spelling).correct("a nalyze")
+
+    assert result.corrected_text == "a nalyze"
+    assert result.corrections == ()
+    assert json.loads(result.metadata["stages"])[0]["accepted"] is False
+
+
+def test_huggingface_pipeline_rejects_valid_word_spelling_rewrite() -> None:
+    spelling = FakeRunner(
+        stage="spelling",
+        outputs={
+            "Please analyze the central idea conveyed": [
+                generated(
+                    "Please analyze the central ideas conveyed.",
+                    0.91,
+                    "spelling",
+                )
+            ]
+        },
+    )
+
+    result = HuggingFaceCorrectionPipeline(spelling_runner=spelling).correct(
+        "Please analyze the central idea conveyed"
+    )
+
+    assert result.corrected_text == "Please analyze the central idea conveyed"
+    assert result.corrections == ()
+
+
+def test_huggingface_pipeline_adds_period_after_substantive_grammar_fix() -> None:
+    grammar = FakeRunner(
+        stage="grammar",
+        outputs={
+            "There book is on table": [
+                generated("There is a book on the table", 0.82, "grammar")
+            ]
+        },
+    )
+
+    result = HuggingFaceCorrectionPipeline(grammar_runner=grammar).correct(
+        "There book is on table"
+    )
+
+    assert result.corrected_text == "There is a book on the table."
 
 
 def test_huggingface_pipeline_applies_semantic_stage_between_models() -> None:
@@ -226,6 +370,64 @@ def test_isolated_character_input_detects_letters_only() -> None:
     assert not is_isolated_character_input("hi")
     assert not is_isolated_character_input("1")
     assert not is_isolated_character_input("?")
+
+
+def test_single_word_fragment_input_detects_plain_words_only() -> None:
+    assert is_single_word_fragment_input("the")
+    assert is_single_word_fragment_input("can't")
+    assert not is_single_word_fragment_input("the cat")
+    assert not is_single_word_fragment_input("the.")
+
+
+def test_word_or_ocr_fragment_output_allows_only_one_unpunctuated_word() -> None:
+    assert is_word_or_ocr_fragment_output("analyze")
+    assert not is_word_or_ocr_fragment_output("A smile.")
+    assert not is_word_or_ocr_fragment_output("Please.")
+    assert not is_word_or_ocr_fragment_output("a nalyze")
+
+
+def test_repair_ocr_fragments_merges_frequency_ranked_word_fragments() -> None:
+    assert repair_ocr_fragments("a nalyze") == "analyze"
+    assert repair_ocr_fragments("centra I") == "central"
+    assert repair_ocr_fragments("Please a nalyze this") == "Please analyze this"
+
+
+def test_best_fragment_merge_candidate_uses_frequency_and_edit_distance() -> None:
+    runner = WordfreqFragmentCorrectionRunner()
+
+    assert (
+        best_fragment_merge_candidate(
+            "i",
+            "plea",
+            language="en",
+            top_n=runner.top_n,
+            min_zipf=runner.min_zipf,
+            min_margin=runner.min_margin,
+            distance_penalty=runner.distance_penalty,
+        )
+        == "idea"
+    )
+
+
+def test_probable_word_spelling_change_uses_frequency_and_edit_distance() -> None:
+    assert is_probable_word_spelling_change("teh", "the", language="en")
+    assert is_probable_word_spelling_change("chlid", "child", language="en")
+    assert not is_probable_word_spelling_change("idea", "ideas", language="en")
+    assert not is_probable_word_spelling_change("conveyed", "conversely", language="en")
+
+
+def test_finalize_grammar_output_only_punctuates_substantive_sentence_fixes() -> None:
+    assert (
+        finalize_grammar_output("There book is on table", "There is a book on the table")
+        == "There is a book on the table."
+    )
+    assert (
+        finalize_grammar_output(
+            "Please analyze the central idea conveyed",
+            "Please analyze the central idea conveyed",
+        )
+        == "Please analyze the central idea conveyed"
+    )
 
 
 def test_diff_corrections_formats_insertions_and_punctuation() -> None:

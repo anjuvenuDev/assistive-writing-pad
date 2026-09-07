@@ -15,6 +15,7 @@ dependencies = [
   "pydantic>=2.0",
   "PyYAML>=6.0",
   "rapidfuzz>=3.0",
+  "wordfreq>=3.1,<4",
   "jiwer>=3.0",
 ]
 
