@@ -188,6 +188,7 @@ def test_evaluation_capture_page_has_labeling_controls() -> None:
     assert 'id="expected"' in CAPTURE_HTML
     assert 'id="save"' in CAPTURE_HTML
     assert "assistiveWritingPadCapture" in CAPTURE_HTML
+    assert 'clearScreen();\n        messageEl.className = "ok"' in CAPTURE_HTML
 
 
 def test_evaluation_capture_is_disabled_by_default() -> None:

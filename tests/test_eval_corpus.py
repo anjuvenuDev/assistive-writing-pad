@@ -69,3 +69,26 @@ def test_append_jsonl_record_writes_one_compact_record_per_line(tmp_path) -> Non
 
     rows = [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines()]
     assert [row["id"] for row in rows] == ["case_1", "case_2"]
+
+
+def test_append_jsonl_record_rejects_duplicate_id(tmp_path) -> None:
+    manifest = tmp_path / "cases.jsonl"
+    append_jsonl_record(manifest, {"id": "sentence_001", "strokes": []})
+
+    with pytest.raises(ValueError, match="already exists"):
+        append_jsonl_record(manifest, {"id": "sentence_001", "strokes": [[{"x": 2}]]})
+
+
+def test_append_jsonl_record_rejects_same_labeled_strokes_under_new_id(tmp_path) -> None:
+    manifest = tmp_path / "cases.jsonl"
+    original = {
+        "id": "sentence_001",
+        "category": "sentence",
+        "expected": "one",
+        "expected_recognized": "won",
+        "strokes": [[{"x": 1}]],
+    }
+    append_jsonl_record(manifest, original)
+
+    with pytest.raises(ValueError, match="already been saved"):
+        append_jsonl_record(manifest, {**original, "id": "sentence_002"})

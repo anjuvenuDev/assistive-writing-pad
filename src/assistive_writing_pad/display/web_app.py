@@ -1068,6 +1068,7 @@ CAPTURE_HTML = """<!doctype html>
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Save failed");
+        clearScreen();
         messageEl.className = "ok";
         messageEl.textContent = "Saved " + result.id;
       } catch (err) {

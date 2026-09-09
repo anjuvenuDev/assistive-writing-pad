@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import fcntl
 import json
 from pathlib import Path
 import re
@@ -71,9 +72,29 @@ def stroke_groups_to_jsonable(
 
 def append_jsonl_record(path: Path, record: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.seek(0)
+        existing_records = [
+            json.loads(line)
+            for line in handle
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if any(existing.get("id") == record.get("id") for existing in existing_records):
+            raise ValueError(f"evaluation case id {record.get('id')!r} already exists")
+
+        sample_fields = ("category", "expected", "expected_recognized", "strokes")
+        is_labeled_sample = bool(record.get("category") and record.get("expected") and record.get("strokes"))
+        if is_labeled_sample and any(
+            all(existing.get(field) == record.get(field) for field in sample_fields)
+            for existing in existing_records
+        ):
+            raise ValueError("this labeled stroke sample has already been saved")
+
+        handle.seek(0, 2)
         handle.write(json.dumps(record, separators=(",", ":")))
         handle.write("\n")
+        handle.flush()
 
 
 def validate_manifest_text(field: str, value: str) -> str:
