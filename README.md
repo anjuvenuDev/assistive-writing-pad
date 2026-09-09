@@ -244,9 +244,15 @@ Production recognizer:
 
 - `microsoft/trocr-base-handwritten`
 
-Raspberry Pi candidate recognizer:
+Raspberry Pi experimental recognizer:
 
 - `microsoft/trocr-small-handwritten`
+
+This small checkpoint is not approved as the production default. On the current
+Penpal evidence set, a laptop run reduced average total latency to 1342.8 ms but
+only produced 4/8 corrected exact outputs. The base checkpoint retained 8/8 at
+3440.0 ms. A compact recognizer must therefore be fine-tuned on representative
+handwriting and pass the same accuracy gates before Pi deployment.
 
 Recognition behavior:
 
@@ -550,7 +556,7 @@ AWP_HF_CORRECTION_NUM_BEAMS=4
 AWP_HF_CORRECTION_CANDIDATES=3
 ```
 
-Raspberry Pi experiment settings:
+Raspberry Pi experiment settings (latency exploration only, not accuracy approved):
 
 ```bash
 AWP_DEVICE_PROFILE=raspberry_pi
