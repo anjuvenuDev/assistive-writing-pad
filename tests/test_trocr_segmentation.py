@@ -178,6 +178,7 @@ def test_recognizer_segments_words_and_returns_text_alternatives() -> None:
     assert top[0] == ["cat dog", 0.895]
     assert ["cot dog", 0.81] in top
     assert ["cat dig", 0.805] in top
+    assert ["cot dig", 0.72] in top
 
 
 def test_recognizer_batches_all_word_segments_in_one_model_call() -> None:

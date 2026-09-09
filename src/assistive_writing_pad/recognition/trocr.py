@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from collections import Counter
@@ -929,30 +930,36 @@ def _merge_alternative_parts(
     separator: str,
     limit: int,
 ) -> List[_OCRCandidate]:
-    candidates: Dict[str, _OCRCandidate] = {}
-    primary_text = separator.join(part for part in primary_parts if part).strip()
-    primary_confidence = _mean_confidence(primary_confidences)
-    if primary_text:
-        candidates[primary_text] = _OCRCandidate(primary_text, primary_confidence, primary_text)
+    del primary_parts, primary_confidences
+    beams: List[Tuple[List[str], List[float], float]] = [([], [], 0.0)]
 
-    for index, group in enumerate(candidate_groups):
-        if index >= len(primary_parts):
+    for group in candidate_groups:
+        choices = [candidate for candidate in group if candidate.text.strip()]
+        if not choices:
             continue
-        for alternative in list(group)[1:]:
-            alt_text = alternative.text.strip()
-            if not alt_text or alt_text == primary_parts[index]:
-                continue
-            variant_parts = list(primary_parts)
-            variant_confidences = list(primary_confidences)
-            variant_parts[index] = alt_text
-            variant_confidences[index] = alternative.confidence
-            text = separator.join(part for part in variant_parts if part).strip()
-            confidence = _mean_confidence(variant_confidences)
-            existing = candidates.get(text)
-            if existing is None or confidence > existing.confidence:
-                candidates[text] = _OCRCandidate(text, confidence, text)
+        expanded: Dict[str, Tuple[List[str], List[float], float]] = {}
+        for parts, confidences, log_score in beams:
+            for candidate in choices:
+                candidate_text = candidate.text.strip()
+                next_parts = [*parts, candidate_text]
+                next_confidences = [*confidences, candidate.confidence]
+                next_score = log_score + math.log(max(candidate.confidence, 1e-9))
+                key = separator.join(next_parts).casefold()
+                existing = expanded.get(key)
+                if existing is None or next_score > existing[2]:
+                    expanded[key] = (next_parts, next_confidences, next_score)
+        beams = sorted(expanded.values(), key=lambda item: item[2], reverse=True)[:limit]
 
-    return sorted(candidates.values(), key=lambda item: item.confidence, reverse=True)[:limit]
+    candidates = [
+        _OCRCandidate(
+            text=separator.join(parts).strip(),
+            confidence=_mean_confidence(confidences),
+            raw_text=separator.join(parts).strip(),
+        )
+        for parts, confidences, _score in beams
+        if parts
+    ]
+    return candidates[:limit]
 
 
 def _single_character_candidates(
