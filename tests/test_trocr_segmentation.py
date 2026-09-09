@@ -136,6 +136,20 @@ class StubTrOCRRecognizer(TrOCRHandwritingRecognizer):
         return self.outputs.pop(0)
 
 
+class BatchStubTrOCRRecognizer(TrOCRHandwritingRecognizer):
+    def __init__(self, outputs):
+        super().__init__(num_beams=3, num_return_sequences=3)
+        self.outputs = outputs
+        self.batch_sizes = []
+
+    def _ensure_loaded(self) -> None:
+        return None
+
+    def _run_ocr_batch(self, images):
+        self.batch_sizes.append(len(images))
+        return self.outputs
+
+
 def test_recognizer_segments_words_and_returns_text_alternatives() -> None:
     left = _stroke([(0, 10), (10, 30), (20, 10)])
     right = _stroke([(90, 10), (100, 30), (110, 10)])
@@ -164,3 +178,19 @@ def test_recognizer_segments_words_and_returns_text_alternatives() -> None:
     assert top[0] == ["cat dog", 0.895]
     assert ["cot dog", 0.81] in top
     assert ["cat dig", 0.805] in top
+
+
+def test_recognizer_batches_all_word_segments_in_one_model_call() -> None:
+    left = _stroke([(0, 10), (10, 30), (20, 10)])
+    right = _stroke([(90, 10), (100, 30), (110, 10)])
+    recognizer = BatchStubTrOCRRecognizer(
+        [
+            [_OCRCandidate(text="cat", confidence=0.91, raw_text="cat")],
+            [_OCRCandidate(text="dog", confidence=0.88, raw_text="dog")],
+        ]
+    )
+
+    result = recognizer.recognize_stroke_groups([left, right], mode="auto")
+
+    assert result.text == "cat dog"
+    assert recognizer.batch_sizes == [2]

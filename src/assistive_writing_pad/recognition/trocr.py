@@ -19,11 +19,11 @@ AWP_WORD_SEGMENT
     detected word is recognized independently and results are joined with
     spaces.  On by default for better sentence spacing.
 AWP_TROCR_NUM_BEAMS
-    Beam count for TrOCR generation (default: 3). Set to 1 on constrained
+    Beam count for TrOCR generation (default: 2). Set to 1 on constrained
     devices if latency is more important than alternatives.
 AWP_TROCR_CANDIDATES
-    Number of decoded alternatives to return in metadata/top predictions
-    (default: 3, capped by beam count).
+    Number of decoded alternatives used by automatic hypothesis selection
+    (default: 2, capped by beam count).
 AWP_HF_CACHE_DIR
     Hugging Face cache directory for OCR and correction models. Defaults to
     models/cache/huggingface, or $AWP_MODEL_CACHE/huggingface when set.
@@ -69,8 +69,8 @@ _DEFAULT_RENDER_H = 256
 
 # Whether stroke-geometry word segmentation is enabled.
 _WORD_SEGMENT_ENABLED: bool = os.environ.get("AWP_WORD_SEGMENT", "1").strip() != "0"
-_DEFAULT_NUM_BEAMS = 3
-_DEFAULT_NUM_CANDIDATES = 3
+_DEFAULT_NUM_BEAMS = 2
+_DEFAULT_NUM_CANDIDATES = 2
 _DEFAULT_MAX_WORD_SEGMENTS = 6
 
 
@@ -251,18 +251,21 @@ class TrOCRHandwritingRecognizer:
                 len(word_groups),
             )
 
-            word_candidate_groups: List[List[_OCRCandidate]] = []
-            word_debug = []
+            recognition_groups = []
             for word_index, current_groups in enumerate(word_groups):
                 label = f"line{line_index}"
                 if segmentation == "stroke_word":
                     label = f"{label}_word{word_index}"
-                candidates = self._recognize_group_image(
-                    current_groups,
-                    debug_label=label,
-                    save_debug_images=save_debug_images,
-                )
-                word_candidate_groups.append(candidates)
+                recognition_groups.append((current_groups, label))
+
+            word_candidate_groups = self._recognize_group_images(
+                recognition_groups,
+                save_debug_images=save_debug_images,
+            )
+            word_debug = []
+            for word_index, (current_groups, candidates) in enumerate(
+                zip(word_groups, word_candidate_groups)
+            ):
                 primary = candidates[0] if candidates else _OCRCandidate("", 0.0, "")
                 word_debug.append(
                     {
@@ -383,6 +386,63 @@ class TrOCRHandwritingRecognizer:
         save_debug_images(raw_image, cropped_image, processed_image, label=debug_label)
         return self._run_ocr(proc_image)
 
+    def _recognize_group_images(
+        self,
+        recognition_groups: Sequence[Tuple[Sequence[Sequence[StrokePoint]], str]],
+        save_debug_images,
+    ) -> List[List[_OCRCandidate]]:
+        """Preprocess and recognize one line's segments in a single model batch."""
+
+        images = []
+        for stroke_groups, debug_label in recognition_groups:
+            raw_image = render_stroke_groups_for_trocr(stroke_groups)
+            proc_image, cropped_image, processed_image = _preprocess_image(raw_image)
+            save_debug_images(raw_image, cropped_image, processed_image, label=debug_label)
+            images.append(proc_image)
+        return self._run_ocr_batch(images)
+
+    def _run_ocr_batch(self, images: Sequence[np.ndarray]) -> List[List[_OCRCandidate]]:
+        if not images:
+            return []
+
+        # Preserve test/custom recognizers that intentionally override the
+        # single-image primitive while production TrOCR uses batched inference.
+        if type(self)._run_ocr is not TrOCRHandwritingRecognizer._run_ocr:
+            return [self._run_ocr(image) for image in images]
+
+        inputs = self._processor(images=list(images), return_tensors="pt")
+        generation_kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "return_dict_in_generate": True,
+            "output_scores": True,
+        }
+        if self.num_beams > 1:
+            generation_kwargs["num_beams"] = self.num_beams
+        if self.num_return_sequences > 1:
+            generation_kwargs["num_return_sequences"] = self.num_return_sequences
+
+        with self._torch.no_grad():
+            generated = self._model.generate(inputs.pixel_values, **generation_kwargs)
+
+        raw_texts = self._processor.batch_decode(
+            generated.sequences,
+            skip_special_tokens=True,
+        )
+        group_size = self.num_return_sequences
+        all_candidates = []
+        for image_index in range(len(images)):
+            start = image_index * group_size
+            end = start + group_size
+            group_raw_texts = raw_texts[start:end]
+            confidences = _candidate_confidences_for_range(
+                generated,
+                self._torch,
+                start,
+                len(group_raw_texts),
+            )
+            all_candidates.append(_decoded_candidates(group_raw_texts, confidences))
+        return all_candidates
+
     def _run_ocr(self, image: np.ndarray) -> List[_OCRCandidate]:
         inputs = self._processor(images=image, return_tensors="pt")
         generation_kwargs = {
@@ -400,22 +460,7 @@ class TrOCRHandwritingRecognizer:
 
         raw_texts = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)
         confidences = _candidate_confidences(generated, self._torch, len(raw_texts))
-        seen: Dict[str, _OCRCandidate] = {}
-        for raw_text, confidence in zip(raw_texts, confidences):
-            text = _clean_ocr_text(raw_text).strip()
-            key = text.lower()
-            existing = seen.get(key)
-            candidate = _OCRCandidate(text=text, confidence=confidence, raw_text=raw_text.strip())
-            if existing is None or candidate.confidence > existing.confidence:
-                seen[key] = candidate
-
-        candidates = sorted(seen.values(), key=lambda item: item.confidence, reverse=True)
-        if candidates:
-            return candidates[: self.num_return_sequences]
-
-        fallback_confidence = confidences[0] if confidences else 0.0
-        fallback_raw = raw_texts[0].strip() if raw_texts else ""
-        return [_OCRCandidate(text="", confidence=fallback_confidence, raw_text=fallback_raw)]
+        return _decoded_candidates(raw_texts, confidences)[: self.num_return_sequences]
 
     def _ensure_loaded(self) -> None:
         if self._processor is not None and self._model is not None:
@@ -787,6 +832,56 @@ def _candidate_confidences(generated, torch_module, count: int) -> List[float]:
         return confidences
 
     return [_clamp_confidence(base_confidence * (0.92 ** index)) for index in range(count)]
+
+
+def _candidate_confidences_for_range(
+    generated,
+    torch_module,
+    start: int,
+    count: int,
+) -> List[float]:
+    """Calculate beam confidences relative to one input inside a batch."""
+
+    if count <= 0:
+        return []
+    base_confidence = _generation_confidence(generated, torch_module)
+    if base_confidence <= 0.0:
+        base_confidence = 0.50
+
+    sequence_scores = getattr(generated, "sequences_scores", None)
+    if sequence_scores is not None and len(sequence_scores) >= start + count:
+        scores = sequence_scores[start : start + count]
+        best_score = float(scores[0].item())
+        return [
+            _clamp_confidence(
+                base_confidence * float(torch_module.exp(score - best_score).item())
+            )
+            for score in scores
+        ]
+    return [_clamp_confidence(base_confidence * (0.92 ** index)) for index in range(count)]
+
+
+def _decoded_candidates(
+    raw_texts: Sequence[str],
+    confidences: Sequence[float],
+) -> List[_OCRCandidate]:
+    seen: Dict[str, _OCRCandidate] = {}
+    for index, raw_text in enumerate(raw_texts):
+        confidence = confidences[index] if index < len(confidences) else 0.0
+        text = _clean_ocr_text(raw_text).strip()
+        key = text.lower()
+        existing = seen.get(key)
+        candidate = _OCRCandidate(text=text, confidence=confidence, raw_text=raw_text.strip())
+        if existing is None or candidate.confidence > existing.confidence:
+            seen[key] = candidate
+
+    candidates = sorted(seen.values(), key=lambda item: item.confidence, reverse=True)
+    if candidates:
+        return candidates
+
+    fallback_confidence = confidences[0] if confidences else 0.0
+    fallback_raw = raw_texts[0].strip() if raw_texts else ""
+    return [_OCRCandidate(text="", confidence=fallback_confidence, raw_text=fallback_raw)]
 
 
 def _top_payload(candidates: Sequence[_OCRCandidate], limit: int = 5) -> List[Tuple[str, float]]:
