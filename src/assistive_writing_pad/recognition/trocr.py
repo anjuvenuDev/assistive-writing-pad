@@ -609,11 +609,15 @@ def segment_strokes_into_lines(
     stroke_groups: Sequence[Sequence[StrokePoint]],
     gap_threshold: Optional[float] = None,
 ) -> List[List[Sequence[StrokePoint]]]:
-    """Cluster stroke groups by vertical position into reading lines."""
+    """Cluster stroke groups into reading lines using pen order and geometry."""
 
     stroke_bounds = [_stroke_bounds(stroke) for stroke in stroke_groups if stroke]
     if not stroke_bounds:
         return []
+
+    temporal_lines = _temporal_line_groups(stroke_bounds)
+    if len(temporal_lines) > 1:
+        return [_ordered_line_strokes(line) for line in temporal_lines]
 
     threshold = gap_threshold if gap_threshold is not None else _adaptive_line_gap(stroke_bounds)
     stroke_bounds.sort(key=lambda item: (item.center_y, item.center_x))
@@ -632,11 +636,32 @@ def segment_strokes_into_lines(
 
         current_line.append(bounds)
 
-    lines: List[List[Sequence[StrokePoint]]] = []
-    for line in line_groups:
-        line.sort(key=lambda item: (item.min_x, item.center_y))
-        lines.append([item.stroke for item in line])
+    return [_ordered_line_strokes(line) for line in line_groups]
+
+
+def _temporal_line_groups(stroke_bounds: Sequence[_StrokeBounds]) -> List[List[_StrokeBounds]]:
+    """Detect a new line when writing returns left and moves down a baseline."""
+
+    lines: List[List[_StrokeBounds]] = [[stroke_bounds[0]]]
+    for bounds in stroke_bounds[1:]:
+        current_line = lines[-1]
+        line_left = min(item.min_x for item in current_line)
+        line_right = max(item.max_x for item in current_line)
+        line_width = max(line_right - line_left, 1.0)
+        median_center_y = float(np.median([item.center_y for item in current_line]))
+        median_height = float(np.median([item.height for item in current_line]))
+
+        returns_left = bounds.min_x < line_right - max(line_width * 0.30, 80.0)
+        moves_down = bounds.center_y > median_center_y + max(median_height * 0.85, 35.0)
+        if returns_left and moves_down:
+            lines.append([bounds])
+        else:
+            current_line.append(bounds)
     return lines
+
+
+def _ordered_line_strokes(line: Sequence[_StrokeBounds]) -> List[Sequence[StrokePoint]]:
+    return [item.stroke for item in sorted(line, key=lambda item: (item.min_x, item.center_y))]
 
 
 def segment_strokes_into_words(
