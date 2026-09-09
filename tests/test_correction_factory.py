@@ -9,6 +9,7 @@ def test_correction_factory_uses_huggingface_backend_by_default() -> None:
     corrector = corrector_from_settings(RuntimeSettings())
 
     assert isinstance(corrector, HuggingFaceCorrectionPipeline)
+    assert corrector.lexical_runner is None
     assert corrector.semantic_runner is not None
 
 

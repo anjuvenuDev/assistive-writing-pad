@@ -244,7 +244,7 @@ class HuggingFaceCorrectionPipeline:
             "max_new_tokens": settings.hf_correction_max_new_tokens,
         }
         spelling_runner: Optional[CorrectionModelRunner] = None
-        lexical_runner: Optional[CorrectionModelRunner] = WordfreqFragmentCorrectionRunner()
+        lexical_runner: Optional[CorrectionModelRunner] = None
         semantic_runner: Optional[CorrectionModelRunner] = None
         grammar_runner: Optional[CorrectionModelRunner] = None
 

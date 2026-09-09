@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SEMANTIC_MODEL = "distilbert/distilbert-base-uncased"
 
-TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|\s+|[^\w\s]", re.ASCII)
+TOKEN_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?|\d+(?:[.,]\d+)?|\s+|[^\w\s]", re.ASCII)
 WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?$", re.ASCII)
 
 DEFAULT_CONFUSION_GROUPS: Tuple[Tuple[str, ...], ...] = (

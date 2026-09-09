@@ -88,6 +88,17 @@ def test_semantic_runner_handles_multiple_context_choices() -> None:
     assert result[0].text == "I went to school and there is a book."
 
 
+def test_semantic_runner_preserves_digits_while_scoring_words() -> None:
+    runner = SemanticCorrectionRunner(
+        model_name="fake-semantic",
+        scorer=StaticSemanticScorer({}),
+    )
+
+    result = runner.generate("I am currently in 3rd year.")
+
+    assert result[0].text == "I am currently in 3rd year."
+
+
 def test_semantic_runner_warm_up_delegates_to_scorer() -> None:
     scorer = WarmableSemanticScorer({})
     runner = SemanticCorrectionRunner(model_name="fake-semantic", scorer=scorer)
