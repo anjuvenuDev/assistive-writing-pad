@@ -43,11 +43,10 @@ http://127.0.0.1:8000
 Demo script:
 
 1. Write a character, word, or sentence on the canvas.
-2. Click `Recognize`.
-3. Confirm that the main text area shows corrected text.
-4. Open technical details only if you need raw OCR, confidence, model metadata, or alternatives.
-5. Click `Try Next` when the first OCR/model alternative is wrong.
-6. Click `Clear Screen` before the next sample.
+2. Pause briefly and confirm that the main text area updates automatically.
+3. Use `Read Again` only when you want to rerun the same strokes.
+4. Open technical details only if you need raw OCR, confidence, or model metadata.
+5. Click `Clear Screen` before the next sample.
 
 ## Problem Statement
 
@@ -255,8 +254,9 @@ Recognition behavior:
 - character/word/ocr modes are accepted for compatibility
 - single-character inputs use OCR cleanup and shape/confusion hints
 - lines are clustered from stroke bounds
-- clear word gaps are recognized independently and joined with spaces
-- beam alternatives are kept for retry/retranslation
+- clear word gaps are recognized as one batched TrOCR request and joined with spaces
+- bounded beam search builds multi-word hypothesis combinations
+- TrOCR confidence and corpus-language probability select the best hypothesis automatically
 - debug images can be saved with `AWP_DEBUG_OCR=1`
 
 ### 4. Correction Module
@@ -332,8 +332,8 @@ Browser UI:
 - corrected text output
 - correction list
 - recognition and correction confidence
-- `Recognize`
-- `Try Next`
+- automatic recognition after a 350 ms writing pause
+- `Read Again`
 - `Clear Screen`
 - technical details collapsed away from the child-facing screen
 
@@ -544,8 +544,8 @@ AWP_HF_CORRECTION_LOCAL_FILES_ONLY=0
 AWP_PRELOAD_OCR_MODEL=1
 AWP_PRELOAD_CORRECTION_MODELS=1
 AWP_WORD_SEGMENT=1
-AWP_TROCR_NUM_BEAMS=3
-AWP_TROCR_CANDIDATES=3
+AWP_TROCR_NUM_BEAMS=2
+AWP_TROCR_CANDIDATES=2
 AWP_HF_CORRECTION_NUM_BEAMS=4
 AWP_HF_CORRECTION_CANDIDATES=3
 ```
@@ -777,8 +777,8 @@ Current Penpal synthetic result:
 - corrected output exact: 8/8 (100.0%)
 - recognition CER/WER: 17.9% / 91.7%
 - corrected CER/WER: 0.0% / 0.0%
-- average total latency: 4248.3 ms
-- p95 total latency: 10300.7 ms
+- average total latency: 3440.0 ms
+- p95 total latency: 8304.2 ms
 
 ### Coverage Gate
 
@@ -852,7 +852,7 @@ Before demo:
 4. Run the smoke suite if benchmark evidence is needed.
 5. Start `assistive-writing-web`.
 6. Open `http://127.0.0.1:8000`.
-7. Test `Recognize`, `Try Next`, and `Clear Screen`.
+7. Test automatic recognition, `Read Again`, and `Clear Screen`.
 
 Good demo inputs:
 
@@ -869,7 +869,7 @@ Demo talking points:
 - Recognition and correction are separate modules.
 - Raw OCR is preserved in technical details.
 - The main output shows corrected text.
-- The app can retry alternatives instead of forcing the first guess.
+- The app evaluates bounded OCR combinations and selects its best output automatically.
 - Manual samples become repeatable evaluation fixtures.
 - Production claims are gated by measured evidence, not assumptions.
 
@@ -1078,7 +1078,7 @@ Before claiming production readiness:
 
 - The current strongest evidence is still smoke plus synthetic benchmark evidence.
 - Manual child handwriting coverage is missing.
-- Sentence OCR can be slow because word segmentation may run TrOCR once per word.
+- Sentence OCR remains above the realtime target on the current CPU despite batched word decoding.
 - Raw recognition exact accuracy on the current synthetic Penpal set is 37.5%.
 - Correction can recover the current synthetic failures, but that does not prove arbitrary handwriting accuracy.
 - Raspberry Pi latency is not yet measured on target hardware.
@@ -1089,7 +1089,8 @@ Recent completed module work includes:
 
 - all live handwriting recognition routed through TrOCR
 - UI simplified to core child-facing controls
-- retry/retranslation support through alternatives
+- automatic bounded OCR hypothesis generation and corpus-based selection
+- stale-result protection and serialized realtime browser requests
 - Hugging Face spelling, semantic, and grammar correction
 - model warm-up for realtime use
 - correction evaluation gate

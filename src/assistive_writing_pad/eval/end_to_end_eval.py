@@ -177,12 +177,13 @@ def evaluate_end_to_end_cases(
         pipeline_result = pipeline.process_recognition(recognition)
         correction_latency_ms = (time.perf_counter() - correction_started) * 1000.0
 
+        selected_recognition = pipeline_result.recognition
         correction = pipeline_result.correction
         expected_recognized = normalize_for_recognition_eval(
             case.expected_recognized_text or case.expected_corrected_text
         )
         expected_corrected = normalize_for_eval(case.expected_corrected_text)
-        recognized = normalize_for_recognition_eval(recognition.text)
+        recognized = normalize_for_recognition_eval(selected_recognition.text)
         corrected = normalize_for_eval(correction.corrected_text)
 
         rows.append(
@@ -193,7 +194,7 @@ def evaluate_end_to_end_cases(
                 expected_recognized_text=case.expected_recognized_text
                 or case.expected_corrected_text,
                 expected_corrected_text=case.expected_corrected_text,
-                recognized_text=recognition.text,
+                recognized_text=selected_recognition.text,
                 corrected_text=correction.corrected_text,
                 recognition_exact_match=recognized == expected_recognized,
                 corrected_exact_match=corrected == expected_corrected,
@@ -204,9 +205,9 @@ def evaluate_end_to_end_cases(
                 recognition_latency_ms=round(recognition_latency_ms, 3),
                 correction_latency_ms=round(correction_latency_ms, 3),
                 total_latency_ms=round(recognition_latency_ms + correction_latency_ms, 3),
-                recognition_confidence=round(recognition.confidence, 4),
+                recognition_confidence=round(selected_recognition.confidence, 4),
                 correction_confidence=round(correction.confidence, 4),
-                low_confidence=recognition.confidence < confidence_threshold,
+                low_confidence=selected_recognition.confidence < confidence_threshold,
                 needs_review=pipeline_result.needs_review,
                 correction_count=len(correction.corrections),
             )

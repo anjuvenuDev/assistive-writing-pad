@@ -1,7 +1,11 @@
 import pytest
 
 from assistive_writing_pad.config.settings import RuntimeSettings
-from assistive_writing_pad.contracts import CorrectionResult, RecognitionResult
+from assistive_writing_pad.contracts import (
+    CorrectionResult,
+    RecognitionHypothesisSelection,
+    RecognitionResult,
+)
 from assistive_writing_pad.correction.contextual import ContextualCorrector
 from assistive_writing_pad.display.web_app import (
     CAPTURE_HTML,
@@ -27,6 +31,32 @@ class WarmableCorrector:
 
     def warm_up(self) -> None:
         self.warm_up_count += 1
+
+    def correct(self, text: str) -> CorrectionResult:
+        return CorrectionResult(original_text=text, corrected_text=text)
+
+
+class AlternativeRecognizer:
+    def recognize_stroke_groups(self, stroke_groups, mode="auto") -> RecognitionResult:
+        return RecognitionResult(
+            text="I fed the cot",
+            confidence=0.91,
+            metadata={
+                "recognizer": "stub",
+                "mode": mode,
+                "top3": '[["I fed the cot", 0.91], ["I fed the cat", 0.76]]',
+            },
+        )
+
+
+class AutoSelectingCorrector:
+    def select_recognition_candidate(self, candidates):
+        return RecognitionHypothesisSelection(
+            text="I fed the cat",
+            confidence=0.76,
+            rankings=(("I fed the cat", 0.82),),
+            metadata={"selector": "test-selector"},
+        )
 
     def correct(self, text: str) -> CorrectionResult:
         return CorrectionResult(original_text=text, corrected_text=text)
@@ -92,6 +122,23 @@ def test_recognition_service_accepts_legacy_mode_values() -> None:
     assert result["mode"] == "word"
 
 
+def test_recognition_service_returns_automatically_selected_hypothesis() -> None:
+    service = RecognitionService(
+        recognizer=AlternativeRecognizer(),
+        corrector=AutoSelectingCorrector(),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    result = service.recognize_payload(
+        {"strokes": [[{"x": 1, "y": 2, "timestamp_ms": 0}]]}
+    )
+
+    assert result["recognized_text"] == "I fed the cat"
+    assert result["corrected_text"] == "I fed the cat"
+    assert result["confidence"] == 0.76
+    assert result["metadata"]["selector"] == "test-selector"
+
+
 def test_recognition_service_corrects_alternative_text() -> None:
     service = RecognitionService(
         recognizer=StubStrokeGroupRecognizer(),
@@ -120,8 +167,12 @@ def test_recognition_service_rejects_non_string_correction_text() -> None:
 
 def test_browser_ui_keeps_child_facing_controls_simple() -> None:
     assert 'id="recognize"' in HTML
-    assert 'id="tryNext"' in HTML
+    assert 'id="tryNext"' not in HTML
     assert 'id="clearScreen"' in HTML
+    assert "Read Again" in HTML
+    assert "Alternatives" not in HTML
+    assert "setTimeout(recognize, 350)" in HTML
+    assert "recognitionInFlight" in HTML
     assert 'id="space"' not in HTML
     assert 'id="backspace"' not in HTML
     assert 'id="clearText"' not in HTML

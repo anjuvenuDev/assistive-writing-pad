@@ -222,9 +222,6 @@ HTML = """<!doctype html>
       text-align: left;
     }
     /* Top-3 predictions panel */
-    #top3-panel {
-      margin-top: 12px;
-    }
     #correction-panel {
       margin-top: 12px;
       border: 1px solid var(--line);
@@ -283,77 +280,6 @@ HTML = """<!doctype html>
       color: var(--muted);
       font-size: 14px;
     }
-    .top3-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 6px;
-    }
-    .top3-list {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-    .top3-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 10px;
-      background: #f8fafc;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background 0.12s;
-    }
-    .top3-item:hover { background: #e8f0fe; border-color: var(--accent); }
-    .top3-item.top3-active {
-      border-color: var(--accent);
-      background: #eff6ff;
-    }
-    .top3-rank {
-      font-size: 11px;
-      color: var(--muted);
-      width: 14px;
-      text-align: center;
-      flex-shrink: 0;
-    }
-    .top3-char {
-      min-width: 0;
-      overflow-wrap: anywhere;
-      font-size: 15px;
-      font-weight: 650;
-      color: var(--ink);
-      flex: 1;
-    }
-    .top3-bar-wrap {
-      flex: 1;
-      background: #e2e8f0;
-      border-radius: 4px;
-      height: 8px;
-      overflow: hidden;
-    }
-    .top3-bar {
-      height: 100%;
-      border-radius: 4px;
-      background: var(--accent);
-      transition: width 0.3s ease;
-    }
-    .top3-bar.rank1 { background: #2563eb; }
-    .top3-bar.rank2 { background: #60a5fa; }
-    .top3-bar.rank3 { background: #93c5fd; }
-    .top3-bar.rank4 { background: #bfdbfe; }
-    .top3-bar.rank5 { background: #dbeafe; }
-    .top3-pct {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      width: 36px;
-      text-align: right;
-      flex-shrink: 0;
-    }
-    .top3-item.top3-hidden { display: none; }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; }
       #pad { height: 360px; }
@@ -372,8 +298,7 @@ HTML = """<!doctype html>
       </div>
       <canvas id="pad"></canvas>
       <div class="toolbar">
-        <button class="primary" id="recognize">Recognize</button>
-        <button id="tryNext" disabled>Try Next</button>
+        <button class="primary" id="recognize">Read Again</button>
         <button id="clearScreen">Clear Screen</button>
       </div>
     </section>
@@ -390,42 +315,6 @@ HTML = """<!doctype html>
         </div>
         <div id="correction-list">
           <div class="correction-empty">No corrections yet.</div>
-        </div>
-      </div>
-      <!-- OCR candidate panel -->
-      <div id="top3-panel">
-        <div class="top3-title">Alternatives</div>
-        <div class="top3-list" id="top3-list">
-          <div class="top3-item top3-hidden" id="top3-0" data-rank="0">
-            <span class="top3-rank">1</span>
-            <span class="top3-char" id="top3-char-0">&mdash;</span>
-            <div class="top3-bar-wrap"><div class="top3-bar rank1" id="top3-bar-0" style="width:0%"></div></div>
-            <span class="top3-pct" id="top3-pct-0">0%</span>
-          </div>
-          <div class="top3-item top3-hidden" id="top3-1" data-rank="1">
-            <span class="top3-rank">2</span>
-            <span class="top3-char" id="top3-char-1">&mdash;</span>
-            <div class="top3-bar-wrap"><div class="top3-bar rank2" id="top3-bar-1" style="width:0%"></div></div>
-            <span class="top3-pct" id="top3-pct-1">0%</span>
-          </div>
-          <div class="top3-item top3-hidden" id="top3-2" data-rank="2">
-            <span class="top3-rank">3</span>
-            <span class="top3-char" id="top3-char-2">&mdash;</span>
-            <div class="top3-bar-wrap"><div class="top3-bar rank3" id="top3-bar-2" style="width:0%"></div></div>
-            <span class="top3-pct" id="top3-pct-2">0%</span>
-          </div>
-          <div class="top3-item top3-hidden" id="top3-3" data-rank="3">
-            <span class="top3-rank">4</span>
-            <span class="top3-char" id="top3-char-3">&mdash;</span>
-            <div class="top3-bar-wrap"><div class="top3-bar rank4" id="top3-bar-3" style="width:0%"></div></div>
-            <span class="top3-pct" id="top3-pct-3">0%</span>
-          </div>
-          <div class="top3-item top3-hidden" id="top3-4" data-rank="4">
-            <span class="top3-rank">5</span>
-            <span class="top3-char" id="top3-char-4">&mdash;</span>
-            <div class="top3-bar-wrap"><div class="top3-bar rank5" id="top3-bar-4" style="width:0%"></div></div>
-            <span class="top3-pct" id="top3-pct-4">0%</span>
-          </div>
         </div>
       </div>
       <details class="debug-panel">
@@ -454,7 +343,6 @@ HTML = """<!doctype html>
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
     const rawTextEl    = document.getElementById("raw-text");
-    const tryNextEl    = document.getElementById("tryNext");
     const correctionConfidenceEl = document.getElementById("correction-confidence");
     const correctionListEl = document.getElementById("correction-list");
     const pdType       = document.getElementById("pd-type");
@@ -473,8 +361,9 @@ HTML = """<!doctype html>
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
     let currentMode    = "auto";
-    let lastRecognitionAlternatives = [];
-    let lastAlternativeIndex = 0;
+    let strokeRevision = 0;
+    let recognitionInFlight = false;
+    let recognitionQueued = false;
 
     /* -----------------------------------------------------------------------
      * Diagnostics logger
@@ -702,6 +591,7 @@ HTML = """<!doctype html>
       drawing = false;
       currentStroke.push(canvasPoint(event));
       strokes.push(currentStroke);
+      strokeRevision += 1;
       currentStroke = [];
       last = null;
 
@@ -716,7 +606,7 @@ HTML = """<!doctype html>
 
     function scheduleRecognition() {
       if (recognizeTimer) clearTimeout(recognizeTimer);
-      recognizeTimer = setTimeout(recognize, 800);
+      recognizeTimer = setTimeout(recognize, 350);
     }
 
     async function recognize() {
@@ -724,6 +614,13 @@ HTML = """<!doctype html>
         statusEl.textContent = "Write on the pad first.";
         return;
       }
+      if (recognitionInFlight) {
+        recognitionQueued = true;
+        return;
+      }
+      recognizeTimer = null;
+      recognitionInFlight = true;
+      const requestRevision = strokeRevision;
       statusEl.textContent = "Recognizing\u2026";
       resetConfidenceBadge();
       console.log("[AWP] recognize mode:", currentMode);
@@ -735,23 +632,22 @@ HTML = """<!doctype html>
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
-        lastRecognitionAlternatives = buildRecognitionAlternatives(result);
-        lastAlternativeIndex = 0;
-        applyRecognitionResult(result);
+        if (requestRevision === strokeRevision) {
+          applyRecognitionResult(result);
+        } else {
+          recognitionQueued = true;
+        }
       } catch (err) {
-        statusEl.textContent = err.message;
+        if (requestRevision === strokeRevision) {
+          statusEl.textContent = err.message;
+        }
+      } finally {
+        recognitionInFlight = false;
+        if (recognitionQueued) {
+          recognitionQueued = false;
+          scheduleRecognition();
+        }
       }
-    }
-
-    async function correctText(rawText) {
-      const response = await fetch("/api/correct", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({text: rawText})
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Correction failed");
-      return result;
     }
 
     function applyRecognitionResult(result) {
@@ -761,47 +657,11 @@ HTML = """<!doctype html>
         Number(result.correction_confidence || 1)
       );
       const usedMode = result.mode || currentMode;
-      const reviewSuffix = result.needs_review ? "  Review" : "";
-      statusEl.textContent = (result.status || "Recognized") + reviewSuffix;
-      console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "corrections:", result.corrections, "alternatives:", lastRecognitionAlternatives);
+      statusEl.textContent = result.status || "Best match ready.";
+      console.log("[AWP] result mode:", usedMode, "conf:", result.confidence, "corrections:", result.corrections);
       updateRawDetails(result);
       pdStrokes.textContent = strokes.length;
       renderCorrections(result.corrections || []);
-      renderTop3(lastRecognitionAlternatives);
-      updateAlternativeButton();
-    }
-
-    async function useAlternative(index) {
-      const alternative = lastRecognitionAlternatives[index];
-      if (!alternative) return;
-
-      lastAlternativeIndex = index;
-      renderTop3(lastRecognitionAlternatives);
-      updateAlternativeButton();
-      statusEl.textContent = "Correcting option " + (index + 1) + "\u2026";
-
-      try {
-        const result = await correctText(alternative.text);
-        recognizedEl.value = result.corrected_text || alternative.text;
-        updateConfidenceBadge(
-          Number(alternative.confidence || 0),
-          Number(result.correction_confidence || 1)
-        );
-        statusEl.textContent = "Using option " + (index + 1) + " of " + lastRecognitionAlternatives.length;
-        rawTextEl.textContent = "[alternative] " + alternative.text;
-        renderCorrections(result.corrections || []);
-      } catch (err) {
-        statusEl.textContent = err.message;
-      }
-    }
-
-    function tryNextAlternative() {
-      if (lastRecognitionAlternatives.length < 2) {
-        statusEl.textContent = "No other option yet.";
-        return;
-      }
-      const nextIndex = (lastAlternativeIndex + 1) % lastRecognitionAlternatives.length;
-      useAlternative(nextIndex);
     }
 
     function updateRawDetails(result) {
@@ -815,37 +675,6 @@ HTML = """<!doctype html>
       rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
     }
 
-    function buildRecognitionAlternatives(result) {
-      const alternatives = [];
-      const seen = new Set();
-      addUniqueAlternative(alternatives, seen, result.recognized_text || result.text, result.confidence);
-      (result.top3 || []).forEach(item => {
-        const text = Array.isArray(item) ? item[0] : item.text;
-        const confidence = Array.isArray(item) ? item[1] : item.confidence;
-        addUniqueAlternative(alternatives, seen, text, confidence);
-      });
-
-      const correctionMeta = result.correction_metadata || {};
-      parseJsonArray(correctionMeta.stages).forEach(stage => {
-        (stage.alternatives || []).forEach(item => {
-          addUniqueAlternative(alternatives, seen, item.text, item.confidence);
-        });
-      });
-      return alternatives;
-    }
-
-    function addUniqueAlternative(alternatives, seen, text, confidence) {
-      const value = String(text || "").trim();
-      if (!value) return;
-      const key = value.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      alternatives.push({
-        text: value,
-        confidence: Number(confidence || 0)
-      });
-    }
-
     function parseJsonArray(value) {
       if (!value) return [];
       try {
@@ -854,10 +683,6 @@ HTML = """<!doctype html>
       } catch (_) {
         return [];
       }
-    }
-
-    function updateAlternativeButton() {
-      tryNextEl.disabled = lastRecognitionAlternatives.length < 2;
     }
 
     function resetConfidenceBadge() {
@@ -922,38 +747,11 @@ HTML = """<!doctype html>
       });
     }
 
-    function renderTop3(top3) {
-      const MAX_SLOTS = 5;
-      for (let i = 0; i < MAX_SLOTS; i++) {
-        const item   = document.getElementById("top3-" + i);
-        const charEl = document.getElementById("top3-char-" + i);
-        const barEl  = document.getElementById("top3-bar-" + i);
-        const pctEl  = document.getElementById("top3-pct-" + i);
-        if (!item) continue;  // slot may not exist yet
-        if (i < top3.length) {
-          const entry = top3[i];
-          const text = Array.isArray(entry) ? entry[0] : entry.text;
-          const conf = Array.isArray(entry) ? entry[1] : entry.confidence;
-          charEl.textContent = text || "?";
-          const pct = Math.min(100, Math.max(0, Math.round((conf || 0) * 100)));
-          barEl.style.width  = pct + "%";
-          pctEl.textContent  = pct + "%";
-          item.classList.remove("top3-hidden");
-          item.classList.toggle("top3-active", i === lastAlternativeIndex);
-          item.onclick = () => useAlternative(i);
-        } else {
-          item.classList.add("top3-hidden");
-          item.classList.remove("top3-active");
-          item.onclick = null;
-        }
-      }
-    }
-
     function clearScreen() {
       strokes = [];
       currentStroke = [];
-      lastRecognitionAlternatives = [];
-      lastAlternativeIndex = 0;
+      strokeRevision += 1;
+      recognitionQueued = false;
       if (recognizeTimer) {
         clearTimeout(recognizeTimer);
         recognizeTimer = null;
@@ -973,8 +771,6 @@ HTML = """<!doctype html>
       statusEl.textContent = "Ready";
       pdStrokes.textContent = "0";
       renderCorrections([]);
-      renderTop3([]);
-      updateAlternativeButton();
     }
 
     function exportStrokePayload() {
@@ -1013,14 +809,11 @@ HTML = """<!doctype html>
 
     // Toolbar buttons
     document.getElementById("recognize").addEventListener("click", recognize);
-    document.getElementById("tryNext").addEventListener("click", tryNextAlternative);
     document.getElementById("clearScreen").addEventListener("click", clearScreen);
 
     // Initial canvas setup.
     resizeCanvas();
     renderCorrections([]);
-    renderTop3([]);  // initialise top-3 panel in hidden state
-    updateAlternativeButton();
   </script>
 </body>
 </html>
@@ -1366,6 +1159,7 @@ class RecognitionService:
             mode = "ocr"
         result = self.recognizer.recognize_stroke_groups(stroke_groups, mode=mode)
         pipeline_result = self.pipeline.process_recognition(result)
+        selected_recognition = pipeline_result.recognition
         # Parse top3 from metadata (list of [char, confidence] pairs).
         top3_raw = result.metadata.get("top3", "[]")
         try:
@@ -1375,18 +1169,18 @@ class RecognitionService:
         correction = pipeline_result.correction
         return {
             "text": correction.corrected_text,
-            "recognized_text": result.text,
+            "recognized_text": selected_recognition.text,
             "corrected_text": correction.corrected_text,
-            "confidence": result.confidence,
+            "confidence": selected_recognition.confidence,
             "correction_confidence": correction.confidence,
             "corrections": corrections_payload(correction),
             "correction_metadata": correction.metadata,
             "needs_review": pipeline_result.needs_review,
             "review_reason": pipeline_result.review_reason,
             "status": status_message(pipeline_result),
-            "metadata": result.metadata,
+            "metadata": selected_recognition.metadata,
             "top3": top3,
-            "mode": result.metadata.get("mode", mode),
+            "mode": selected_recognition.metadata.get("mode", mode),
         }
 
     def correct_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1451,10 +1245,10 @@ def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
 
 def status_message(result: PipelineResult) -> str:
     if result.needs_review:
-        return "Recognized and corrected handwriting; review recommended."
+        return "Best match ready."
     if result.correction.changed:
-        return "Recognized and corrected handwriting."
-    return "Recognized handwriting."
+        return "Writing corrected."
+    return "Writing recognized."
 
 
 def stroke_groups_from_payload(payload: Dict[str, Any]) -> List[List[StrokePoint]]:
