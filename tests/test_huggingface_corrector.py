@@ -234,6 +234,17 @@ def test_huggingface_pipeline_rejects_sentence_output_for_ocr_word_fragment() ->
     assert json.loads(result.metadata["stages"])[0]["accepted"] is False
 
 
+def test_huggingface_pipeline_accepts_spelling_fix_for_short_phrase() -> None:
+    spelling = FakeRunner(
+        stage="spelling",
+        outputs={"more sentces": [generated("More sentences", 0.91, "spelling")]},
+    )
+
+    result = HuggingFaceCorrectionPipeline(spelling_runner=spelling).correct("more sentces")
+
+    assert result.corrected_text == "More sentences"
+
+
 def test_huggingface_pipeline_rejects_valid_word_spelling_rewrite() -> None:
     spelling = FakeRunner(
         stage="spelling",
@@ -451,6 +462,11 @@ def test_probable_word_spelling_change_uses_frequency_and_edit_distance() -> Non
     assert is_probable_word_spelling_change("chlid", "child", language="en")
     assert not is_probable_word_spelling_change("idea", "ideas", language="en")
     assert not is_probable_word_spelling_change("conveyed", "conversely", language="en")
+
+
+def test_probable_word_spelling_change_allows_short_token_expansion() -> None:
+    assert is_probable_word_spelling_change("u", "you", language="en")
+    assert is_probable_word_spelling_change("r", "are", language="en")
 
 
 def test_finalize_grammar_output_only_punctuates_substantive_sentence_fixes() -> None:

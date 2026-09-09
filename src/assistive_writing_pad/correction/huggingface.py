@@ -78,8 +78,8 @@ class HFSeq2SeqCorrectionRunner:
     cache_dir: Optional[Path] = None
     local_files_only: bool = False
     device: str = "auto"
-    num_beams: int = 4
-    num_return_sequences: int = 3
+    num_beams: int = 6
+    num_return_sequences: int = 6
     max_input_tokens: int = 128
     max_new_tokens: int = 128
     _tokenizer: object = field(default=None, init=False, repr=False)
@@ -482,7 +482,7 @@ class HuggingFaceCorrectionPipeline:
             return False
         if normalize_generated_text(original) == normalize_generated_text(candidate):
             return True
-        if is_word_or_ocr_fragment_input(original) and not is_word_or_ocr_fragment_output(
+        if is_split_word_fragment_input(original) and not is_word_or_ocr_fragment_output(
             candidate
         ):
             return False
@@ -498,6 +498,17 @@ class HuggingFaceCorrectionPipeline:
 
     def _generation_rank_score(self, original: str, candidate: GeneratedCorrection) -> float:
         score = candidate.confidence
+        if candidate.stage == "spelling":
+            character_similarity = difflib.SequenceMatcher(
+                a=normalize_generated_text(original).casefold(),
+                b=normalize_generated_text(candidate.text).casefold(),
+                autojunk=False,
+            ).ratio()
+            score = (
+                (candidate.confidence * 0.05)
+                + (recognition_lexical_score(candidate.text) * 0.40)
+                + (character_similarity * 0.55)
+            )
         original_tokens = normalized_word_tokens(original)
         candidate_tokens = normalized_word_tokens(candidate.text)
         if original_tokens and candidate_tokens:
@@ -764,6 +775,22 @@ def is_word_or_ocr_fragment_input(text: str) -> bool:
     return bool(tokens) and len(tokens) <= 2 and not any(char in ".,!?;:" for char in cleaned)
 
 
+def is_split_word_fragment_input(text: str) -> bool:
+    tokens = normalized_word_tokens(text)
+    cleaned = normalize_generated_text(text)
+    if len(tokens) != 2 or any(char in ".,!?;:" for char in cleaned):
+        return False
+    return best_fragment_merge_candidate(
+        tokens[0],
+        tokens[1],
+        language="en",
+        top_n=100000,
+        min_zipf=3.0,
+        min_margin=0.05,
+        distance_penalty=0.60,
+    ) is not None
+
+
 def is_word_or_ocr_fragment_output(text: str) -> bool:
     tokens = normalized_word_tokens(text)
     cleaned = normalize_generated_text(text)
@@ -878,6 +905,8 @@ def is_probable_word_spelling_change(
     max_distance = max(2, math.ceil(len(source) * 0.35))
     if distance > max_distance:
         return False
+    if len(source) <= 2 and len(target) <= 4:
+        return True
 
     source_frequency = zipf_frequency(source, language)
     target_frequency = zipf_frequency(target, language)

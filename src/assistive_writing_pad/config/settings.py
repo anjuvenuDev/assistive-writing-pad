@@ -40,8 +40,8 @@ class RuntimeSettings:
     hf_grammar_model: str = "gotutiyan/gec-bart-base"
     hf_correction_local_files_only: bool = False
     hf_correction_device: str = "auto"
-    hf_correction_num_beams: int = 4
-    hf_correction_candidates: int = 3
+    hf_correction_num_beams: int = 6
+    hf_correction_candidates: int = 6
     hf_correction_max_input_tokens: int = 128
     hf_correction_max_new_tokens: int = 128
     hf_correction_min_confidence: float = 0.0
