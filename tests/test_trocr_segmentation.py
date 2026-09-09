@@ -1,11 +1,15 @@
 import json
 
+import pytest
+import torch
+
 from assistive_writing_pad.contracts import StrokePoint
 from assistive_writing_pad.recognition.trocr import (
     TrOCRHandwritingRecognizer,
     _OCRCandidate,
     _looks_like_single_character_input,
     _single_character_candidates,
+    _transition_confidences,
     segment_strokes_into_lines,
     segment_strokes_into_words,
 )
@@ -16,6 +20,23 @@ def _stroke(points):
         StrokePoint(x=float(x), y=float(y), timestamp_ms=index * 16, pressure=1.0)
         for index, (x, y) in enumerate(points)
     ]
+
+
+def test_transition_confidence_is_computed_per_generated_sequence() -> None:
+    class Generated:
+        sequences = torch.tensor([[1, 2], [3, 4]])
+        scores = (torch.tensor([[0.0]]),)
+        beam_indices = torch.tensor([[0, 0], [1, 1]])
+
+    class Model:
+        def compute_transition_scores(self, sequences, scores, **kwargs):
+            assert sequences.shape == (2, 2)
+            assert kwargs["normalize_logits"] is True
+            return torch.tensor([[-0.1, -0.3], [-1.0, -1.0]])
+
+    confidences = _transition_confidences(Generated(), Model())
+
+    assert confidences == pytest.approx([0.8187, 0.3679], abs=0.0001)
 
 
 def test_default_line_segmentation_keeps_dotted_i_together() -> None:

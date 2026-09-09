@@ -323,6 +323,7 @@ class TrOCRHandwritingRecognizer:
                 "requested_mode": requested_mode,
                 "top3": json.dumps(_top_payload(final_candidates)),
                 "word_segmentation": "enabled" if _WORD_SEGMENT_ENABLED else "disabled",
+                "confidence_method": "mean_selected_token_probability",
             },
         )
 
@@ -365,6 +366,7 @@ class TrOCRHandwritingRecognizer:
                 "single_character": "true",
                 "single_character_reason": reason,
                 "top3": json.dumps(_top_payload(top_candidates)),
+                "confidence_method": "mean_selected_token_probability",
             },
         )
 
@@ -440,6 +442,7 @@ class TrOCRHandwritingRecognizer:
                 self._torch,
                 start,
                 len(group_raw_texts),
+                model=self._model,
             )
             all_candidates.append(_decoded_candidates(group_raw_texts, confidences))
         return all_candidates
@@ -460,7 +463,12 @@ class TrOCRHandwritingRecognizer:
             generated = self._model.generate(inputs.pixel_values, **generation_kwargs)
 
         raw_texts = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)
-        confidences = _candidate_confidences(generated, self._torch, len(raw_texts))
+        confidences = _candidate_confidences(
+            generated,
+            self._torch,
+            len(raw_texts),
+            model=self._model,
+        )
         return _decoded_candidates(raw_texts, confidences)[: self.num_return_sequences]
 
     def _ensure_loaded(self) -> None:
@@ -839,9 +847,19 @@ def _generation_confidence(generated, torch_module) -> float:
     return float(np.mean(token_confidences))
 
 
-def _candidate_confidences(generated, torch_module, count: int) -> List[float]:
+def _candidate_confidences(
+    generated,
+    torch_module,
+    count: int,
+    *,
+    model=None,
+) -> List[float]:
     if count <= 0:
         return []
+
+    transition_confidences = _transition_confidences(generated, model)
+    if len(transition_confidences) >= count:
+        return transition_confidences[:count]
 
     base_confidence = _generation_confidence(generated, torch_module)
     if base_confidence <= 0.0:
@@ -865,11 +883,17 @@ def _candidate_confidences_for_range(
     torch_module,
     start: int,
     count: int,
+    *,
+    model=None,
 ) -> List[float]:
     """Calculate beam confidences relative to one input inside a batch."""
 
     if count <= 0:
         return []
+    transition_confidences = _transition_confidences(generated, model)
+    if len(transition_confidences) >= start + count:
+        return transition_confidences[start : start + count]
+
     base_confidence = _generation_confidence(generated, torch_module)
     if base_confidence <= 0.0:
         base_confidence = 0.50
@@ -885,6 +909,35 @@ def _candidate_confidences_for_range(
             for score in scores
         ]
     return [_clamp_confidence(base_confidence * (0.92 ** index)) for index in range(count)]
+
+
+def _transition_confidences(generated, model) -> List[float]:
+    """Return geometric mean selected-token probabilities per generated sequence."""
+
+    if model is None:
+        return []
+    try:
+        kwargs = {"normalize_logits": True}
+        beam_indices = getattr(generated, "beam_indices", None)
+        if beam_indices is not None:
+            kwargs["beam_indices"] = beam_indices
+        scores = model.compute_transition_scores(
+            generated.sequences,
+            generated.scores,
+            **kwargs,
+        )
+    except Exception:
+        return []
+
+    confidences = []
+    for row in scores:
+        values = row.detach().float()
+        values = values[values < 0]
+        if values.numel() == 0:
+            confidences.append(0.0)
+            continue
+        confidences.append(_clamp_confidence(math.exp(float(values.mean().item()))))
+    return confidences
 
 
 def _decoded_candidates(
