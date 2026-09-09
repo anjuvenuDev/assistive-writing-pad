@@ -342,6 +342,43 @@ def test_huggingface_pipeline_warms_active_runners_in_stage_order() -> None:
     assert warm_log == ["spelling", "semantic", "grammar"]
 
 
+def test_huggingface_pipeline_automatically_selects_corpus_ranked_ocr_hypothesis() -> None:
+    pipeline = HuggingFaceCorrectionPipeline()
+
+    selection = pipeline.select_recognition_candidate(
+        (("I fed the cot", 0.91), ("I fed the cat", 0.76))
+    )
+
+    assert selection.text == "I fed the cat"
+    assert selection.metadata["selector"] == "trocr+wordfreq_corpus"
+    assert selection.rankings[0][0] == "I fed the cat"
+
+
+def test_huggingface_pipeline_preserves_primary_for_context_free_word_hypotheses() -> None:
+    pipeline = HuggingFaceCorrectionPipeline(
+        lexical_runner=WordfreqFragmentCorrectionRunner()
+    )
+
+    selection = pipeline.select_recognition_candidate(
+        (("i plea", 0.88), ("i clear", 0.84))
+    )
+
+    assert selection.text == "i plea"
+
+
+def test_huggingface_pipeline_requires_material_score_gain_to_replace_primary() -> None:
+    pipeline = HuggingFaceCorrectionPipeline()
+
+    selection = pipeline.select_recognition_candidate(
+        (
+            ("Please a nalyze the central i plea conveyed", 0.9998),
+            ("Please a na lyze the central i plea conveyed", 0.9905),
+        )
+    )
+
+    assert selection.text == "Please a nalyze the central i plea conveyed"
+
+
 def test_huggingface_pipeline_uses_configured_cache_dir(tmp_path) -> None:
     from assistive_writing_pad.config.settings import RuntimeSettings
 

@@ -17,7 +17,11 @@ from typing import Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 from rapidfuzz.distance import Levenshtein
 
 from assistive_writing_pad.config.settings import RuntimeSettings
-from assistive_writing_pad.contracts import Correction, CorrectionResult
+from assistive_writing_pad.contracts import (
+    Correction,
+    CorrectionResult,
+    RecognitionHypothesisSelection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +295,64 @@ class HuggingFaceCorrectionPipeline:
             if callable(warm_up):
                 warm_up()
 
+    def select_recognition_candidate(
+        self,
+        candidates: Sequence[Tuple[str, float]],
+    ) -> RecognitionHypothesisSelection:
+        unique: Dict[str, Tuple[str, float]] = {}
+        for text, confidence in candidates:
+            cleaned = normalize_generated_text(text)
+            if not cleaned:
+                continue
+            key = cleaned.casefold()
+            current = unique.get(key)
+            if current is None or confidence > current[1]:
+                unique[key] = (cleaned, max(0.0, min(1.0, float(confidence))))
+        hypotheses = list(unique.values())[:5]
+        if len(hypotheses) <= 1:
+            text, confidence = hypotheses[0] if hypotheses else ("", 0.0)
+            return RecognitionHypothesisSelection(text=text, confidence=confidence)
+
+        prepared = [self._prepare_recognition_hypothesis(text) for text, _ in hypotheses]
+        if max(len(normalized_word_tokens(text)) for text in prepared) < 3:
+            text, confidence = hypotheses[0]
+            return RecognitionHypothesisSelection(text=text, confidence=confidence)
+
+        scored = []
+        for index, ((text, ocr_confidence), normalized) in enumerate(zip(hypotheses, prepared)):
+            lexical_score = recognition_lexical_score(normalized)
+            repair_ratio = text_change_ratio(text, normalized)
+            final_score = (
+                (ocr_confidence * 0.50)
+                + (lexical_score * 0.50)
+                - (repair_ratio * 0.08)
+            )
+            scored.append((text, ocr_confidence, max(0.0, min(1.0, final_score))))
+        scored.sort(key=lambda item: item[2], reverse=True)
+        selected_text, selected_confidence, selected_score = scored[0]
+        primary_text = hypotheses[0][0]
+        primary = next(item for item in scored if item[0] == primary_text)
+        if selected_text != primary_text and selected_score < primary[2] + 0.02:
+            selected_text, selected_confidence, _ = primary
+        return RecognitionHypothesisSelection(
+            text=selected_text,
+            confidence=selected_confidence,
+            rankings=tuple((text, round(score, 4)) for text, _confidence, score in scored),
+            metadata={
+                "selector": "trocr+wordfreq_corpus",
+                "candidate_count": str(len(scored)),
+            },
+        )
+
+    def _prepare_recognition_hypothesis(self, text: str) -> str:
+        if self.lexical_runner is None:
+            return text
+        try:
+            generated = list(self.lexical_runner.generate(text))
+        except ModelCorrectionUnavailable:
+            return text
+        return generated[0].text if generated else text
+
     def correct(self, text: str) -> CorrectionResult:
         if not text.strip():
             return CorrectionResult(original_text=text, corrected_text=text, confidence=1.0)
@@ -501,6 +563,30 @@ def normalize_generated_text(text: str) -> str:
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
     cleaned = re.sub(r"([({\[])\s+", r"\1", cleaned)
     return cleaned
+
+
+def recognition_lexical_score(text: str, language: str = "en") -> float:
+    words = normalized_word_tokens(text)
+    if not words:
+        return 0.0
+    scores = [
+        max(0.0, min(1.0, (zipf_frequency(word, language) - 2.0) / 5.0))
+        for word in words
+    ]
+    token_score = float(sum(scores) / len(scores))
+    phrase_score = max(
+        0.0,
+        min(1.0, (zipf_frequency(" ".join(words), language) - 2.0) / 3.0),
+    )
+    return (token_score * 0.55) + (phrase_score * 0.45)
+
+
+def text_change_ratio(original: str, candidate: str) -> float:
+    left = normalize_generated_text(original).casefold()
+    right = normalize_generated_text(candidate).casefold()
+    if not left and not right:
+        return 0.0
+    return 1.0 - difflib.SequenceMatcher(a=left, b=right, autojunk=False).ratio()
 
 
 def repair_ocr_fragments(

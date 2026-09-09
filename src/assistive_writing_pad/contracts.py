@@ -57,6 +57,14 @@ class CorrectionResult:
 
 
 @dataclass(frozen=True)
+class RecognitionHypothesisSelection:
+    text: str
+    confidence: float
+    rankings: Tuple[Tuple[str, float], ...] = ()
+    metadata: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PipelineResult:
     recognition: RecognitionResult
     correction: CorrectionResult
