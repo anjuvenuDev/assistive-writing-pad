@@ -35,7 +35,8 @@ def test_pipeline_flags_low_confidence_recognition_for_review() -> None:
 
     assert result.needs_review is True
     assert result.review_reason == "recognition_confidence_below_threshold"
-    assert result.correction.corrected_text == "the cat sat on a chair"
+    assert result.correction.corrected_text == "teh cat sat on a chaier"
+    assert result.correction.metadata["correction_guardrail"] == "skipped_low_ocr_confidence"
 
 
 def test_pipeline_does_not_fail_when_correction_model_fails() -> None:
@@ -49,3 +50,18 @@ def test_pipeline_does_not_fail_when_correction_model_fails() -> None:
     assert result.needs_review is False
     assert result.correction.corrected_text == "the cat"
     assert result.correction.confidence == 0.0
+
+
+def test_pipeline_preserves_raw_ocr_when_confidence_is_low() -> None:
+    pipeline = WritingPipeline(
+        recognizer=DemoRecognizer(text="nn I loved kWs w", confidence=0.40),
+        corrector=RuleBasedCorrector(),
+    )
+
+    result = pipeline.process_strokes([])
+
+    assert result.recognition.text == "nn I loved kWs w"
+    assert result.correction.original_text == "nn I loved kWs w"
+    assert result.correction.corrected_text == "nn I loved kWs w"
+    assert result.correction.corrections == ()
+    assert result.needs_review is True

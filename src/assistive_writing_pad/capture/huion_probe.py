@@ -7,7 +7,7 @@ not require tablet dependencies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,20 @@ class InputDeviceSummary:
     name: str
     physical_location: str
     is_likely_huion: bool
+    supports_pen: bool = False
+
+
+def huion_axis_ranges(device_path: str) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """Return the device-reported ABS_X and ABS_Y ranges."""
+    evdev = _load_evdev()
+    device = evdev.InputDevice(device_path)
+    ranges = []
+    for code in (evdev.ecodes.ABS_X, evdev.ecodes.ABS_Y):
+        info = device.absinfo(code)
+        if info is None or info.max <= info.min:
+            raise ValueError(f"{device_path} has no usable axis range for {code}")
+        ranges.append((float(info.min), float(info.max)))
+    return ranges[0], ranges[1]
 
 
 def list_input_devices() -> List[InputDeviceSummary]:
@@ -25,12 +39,27 @@ def list_input_devices() -> List[InputDeviceSummary]:
     for path in evdev.list_devices():
         device = evdev.InputDevice(path)
         name = device.name or ""
+        capabilities = device.capabilities()
+        key_codes = set(capabilities.get(evdev.ecodes.EV_KEY, []))
+        abs_codes = {
+            item[0] if isinstance(item, tuple) else item
+            for item in capabilities.get(evdev.ecodes.EV_ABS, [])
+        }
+        supports_pen = {
+            evdev.ecodes.BTN_TOUCH,
+            evdev.ecodes.BTN_TOOL_PEN,
+        }.issubset(key_codes) and {
+            evdev.ecodes.ABS_X,
+            evdev.ecodes.ABS_Y,
+            evdev.ecodes.ABS_PRESSURE,
+        }.issubset(abs_codes)
         summaries.append(
             InputDeviceSummary(
                 path=path,
                 name=name,
                 physical_location=device.phys or "",
-                is_likely_huion=_looks_like_huion(name),
+                is_likely_huion=supports_pen or _looks_like_huion(name),
+                supports_pen=supports_pen,
             )
         )
 
@@ -39,6 +68,9 @@ def list_input_devices() -> List[InputDeviceSummary]:
 
 def find_huion_device(devices: Optional[Iterable[InputDeviceSummary]] = None) -> Optional[str]:
     candidates = list(devices) if devices is not None else list_input_devices()
+    for device in candidates:
+        if device.supports_pen and device.is_likely_huion:
+            return device.path
     for device in candidates:
         if device.is_likely_huion:
             return device.path

@@ -31,8 +31,19 @@ class WritingPipeline:
         return self.process_recognition(recognition)
 
     def process_recognition(self, recognition: RecognitionResult) -> PipelineResult:
+        logger.info("RAW OCR: %s", recognition.text)
+        logger.info("OCR CONFIDENCE: %.3f", recognition.confidence)
         if recognition.confidence < self.settings.confidence_threshold:
-            correction = self._correct_recognition(recognition)
+            correction = CorrectionResult(
+                original_text=recognition.text,
+                corrected_text=recognition.text,
+                confidence=recognition.confidence,
+                metadata={
+                    "correction_guardrail": "skipped_low_ocr_confidence",
+                    "ocr_confidence": f"{recognition.confidence:.4f}",
+                },
+            )
+            logger.info("CORRECTED: %s (preserved raw OCR; review required)", correction.corrected_text)
             return PipelineResult(
                 recognition=recognition,
                 correction=correction,
@@ -41,6 +52,7 @@ class WritingPipeline:
             )
 
         correction = self._correct_recognition(recognition)
+        logger.info("CORRECTED: %s", correction.corrected_text)
         return PipelineResult(
             recognition=recognition,
             correction=correction,

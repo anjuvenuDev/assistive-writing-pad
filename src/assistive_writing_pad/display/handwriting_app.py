@@ -139,7 +139,9 @@ class HandwritingApp:
         self.root.minsize(940, 560)
 
         self.settings = settings or RuntimeSettings.from_env()
-        self.recognizer = recognizer or TrOCRHandwritingRecognizer()
+        self.recognizer = recognizer or TrOCRHandwritingRecognizer(
+            device_profile=self.settings.device_profile
+        )
         self.corrector = corrector or corrector_from_settings(self.settings)
         self.pipeline = WritingPipeline(
             recognizer=self.recognizer,

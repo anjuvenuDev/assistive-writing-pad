@@ -158,6 +158,7 @@ class TrOCRHandwritingRecognizer:
     model_name: str = DEFAULT_TROCR_MODEL
     cache_dir: Optional[Path] = None
     local_files_only: Optional[bool] = None
+    device_profile: Optional[str] = None
     max_new_tokens: int = 48
     num_beams: int = _int_env("AWP_TROCR_NUM_BEAMS", _DEFAULT_NUM_BEAMS)
     num_return_sequences: int = _int_env("AWP_TROCR_CANDIDATES", _DEFAULT_NUM_CANDIDATES)
@@ -170,6 +171,8 @@ class TrOCRHandwritingRecognizer:
             self.cache_dir = Path(self.cache_dir)
         if self.local_files_only is None:
             self.local_files_only = _bool_env("AWP_TROCR_LOCAL_FILES_ONLY", False)
+        if self.device_profile is None:
+            self.device_profile = os.environ.get("AWP_DEVICE_PROFILE", "laptop").strip() or "laptop"
         self.num_beams = max(1, int(self.num_beams))
         self.num_return_sequences = max(1, min(int(self.num_return_sequences), self.num_beams))
         self.max_word_segments = max(1, int(self.max_word_segments))
@@ -237,7 +240,7 @@ class TrOCRHandwritingRecognizer:
         for line_index, line_groups in enumerate(lines):
             word_groups = [line_groups]
             segmentation = "line"
-            if _WORD_SEGMENT_ENABLED and requested_mode in {"auto", "word", "ocr"}:
+            if _WORD_SEGMENT_ENABLED and requested_mode in {"auto", "word"}:
                 segmented_groups = segment_strokes_into_words(line_groups)
                 if 1 < len(segmented_groups) <= self.max_word_segments:
                     word_groups = segmented_groups
@@ -379,12 +382,41 @@ class TrOCRHandwritingRecognizer:
             len(stroke_groups),
         )
 
-        proc_image, cropped_image, processed_image = _preprocess_image(raw_image)
+        proc_image, crop_result, processed_image = _preprocess_image(raw_image)
+        logger.info(
+            "OCR input: original_size=(%d,%d) crop_box=(%d,%d,%d,%d) "
+            "crop_size=(%d,%d) ink_pixels=%d ink_coverage=%.4f valid=%s",
+            crop_result.original_size[0],
+            crop_result.original_size[1],
+            *crop_result.bbox,
+            crop_result.crop_size[0],
+            crop_result.crop_size[1],
+            crop_result.ink_pixels,
+            crop_result.ink_coverage,
+            crop_result.valid,
+        )
+        cropped_image = crop_result.image
         save_debug_images(raw_image, cropped_image, processed_image, label=debug_label)
+        if not crop_result.valid:
+            logger.info("%s: skipping TrOCR because no meaningful handwriting was detected", debug_label)
+            return []
         return self._run_ocr(proc_image)
 
     def _run_ocr(self, image: np.ndarray) -> List[_OCRCandidate]:
+        self._assert_cpu_runtime()
         inputs = self._processor(images=image, return_tensors="pt")
+        pixel_values = inputs.pixel_values.to(self._device)
+        if pixel_values.device != self._device:
+            raise RecognitionUnavailable(
+                f"TrOCR input tensor is on {pixel_values.device}, expected {self._device}"
+            )
+        logger.debug(
+            "TrOCR generate: model_device=%s pixel_values_device=%s beams=%d returns=%d",
+            next(self._model.parameters()).device,
+            pixel_values.device,
+            self.num_beams,
+            self.num_return_sequences,
+        )
         generation_kwargs = {
             "max_new_tokens": self.max_new_tokens,
             "return_dict_in_generate": True,
@@ -395,8 +427,8 @@ class TrOCRHandwritingRecognizer:
         if self.num_return_sequences > 1:
             generation_kwargs["num_return_sequences"] = self.num_return_sequences
 
-        with self._torch.no_grad():
-            generated = self._model.generate(inputs.pixel_values, **generation_kwargs)
+        with self._torch.inference_mode():
+            generated = self._model.generate(pixel_values, **generation_kwargs)
 
         raw_texts = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)
         confidences = _candidate_confidences(generated, self._torch, len(raw_texts))
@@ -432,6 +464,7 @@ class TrOCRHandwritingRecognizer:
             ) from exc
 
         self._torch = torch
+        self._device = torch.device("cpu")
         load_kwargs = {
             "cache_dir": str(self.cache_dir) if self.cache_dir is not None else None,
             "local_files_only": bool(self.local_files_only),
@@ -442,11 +475,17 @@ class TrOCRHandwritingRecognizer:
                 use_fast=False,
                 **load_kwargs,
             )
-            self._model = VisionEncoderDecoderModel.from_pretrained(
-                self.model_name,
-                low_cpu_mem_usage=False,
-                **load_kwargs,
-            )
+            if self.device_profile == "raspberry_pi":
+                self._model = VisionEncoderDecoderModel.from_pretrained(
+                    self.model_name,
+                    **load_kwargs,
+                )
+            else:
+                self._model = VisionEncoderDecoderModel.from_pretrained(
+                    self.model_name,
+                    low_cpu_mem_usage=False,
+                    **load_kwargs,
+                )
         except Exception as exc:
             raise RecognitionUnavailable(
                 f"Could not load TrOCR model {self.model_name!r} from "
@@ -454,8 +493,62 @@ class TrOCRHandwritingRecognizer:
                 "Run `.venv/bin/python scripts/cache_hf_ocr_model.py --model "
                 f"{self.model_name}` before offline recognition."
             ) from exc
-        self._model.to(torch.device("cpu"))
+        self._assert_fully_materialized()
+        self._model.to(self._device)
         self._model.eval()
+        self._assert_cpu_runtime()
+
+    def _assert_fully_materialized(self) -> None:
+        """Reject incomplete checkpoint loads before attempting to move the model."""
+        if self._model is None:
+            raise RecognitionUnavailable("TrOCR model was not loaded")
+
+        meta_tensors = [
+            name
+            for name, tensor in list(self._model.named_parameters())
+            + list(self._model.named_buffers())
+            if tensor.device.type == "meta"
+        ]
+        if meta_tensors:
+            names = ", ".join(meta_tensors[:10])
+            suffix = "..." if len(meta_tensors) > 10 else ""
+            raise RecognitionUnavailable(
+                "TrOCR model loaded with meta-device parameters/buffers; "
+                f"checkpoint is not fully materialized ({names}{suffix})"
+            )
+
+    def _assert_cpu_runtime(self) -> None:
+        """Ensure the model and generation boundary are CPU-only and materialized."""
+        if self._model is None or self._torch is None:
+            raise RecognitionUnavailable("TrOCR model is not loaded")
+
+        meta_tensors = [
+            name
+            for name, tensor in list(self._model.named_parameters())
+            + list(self._model.named_buffers())
+            if tensor.device.type == "meta"
+        ]
+        if meta_tensors:
+            names = ", ".join(meta_tensors[:10])
+            suffix = "..." if len(meta_tensors) > 10 else ""
+            raise RecognitionUnavailable(
+                "TrOCR generation aborted because meta-device tensors remain: "
+                f"{names}{suffix}"
+            )
+
+        non_cpu_tensors = [
+            name
+            for name, tensor in list(self._model.named_parameters())
+            + list(self._model.named_buffers())
+            if tensor.device != self._device
+        ]
+        if non_cpu_tensors:
+            names = ", ".join(non_cpu_tensors[:10])
+            suffix = "..." if len(non_cpu_tensors) > 10 else ""
+            raise RecognitionUnavailable(
+                "TrOCR generation requires CPU tensors; non-CPU model tensors: "
+                f"{names}{suffix}"
+            )
 
 
 def render_strokes_for_trocr(
@@ -541,7 +634,8 @@ def _preprocess_image(
 
     # Stage 1 -- Auto-crop: remove the large whitespace margins so that the
     # model's attention is focused on the actual handwriting region.
-    cropped = auto_crop_handwriting(raw_image, padding=20)
+    crop_result = auto_crop_handwriting(raw_image)
+    cropped = crop_result.image
     logger.debug(
         "_preprocess_image: after crop %dx%d -> %dx%d",
         raw_image.shape[1], raw_image.shape[0],
@@ -556,7 +650,7 @@ def _preprocess_image(
         processed.shape[1], processed.shape[0],
     )
 
-    return processed, cropped, processed
+    return processed, crop_result, processed
 
 
 def segment_strokes_into_lines(

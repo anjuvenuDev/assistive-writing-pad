@@ -352,6 +352,16 @@ class HuggingFaceCorrectionPipeline:
                 key=lambda item: self._generation_rank_score(before, item),
                 reverse=True,
             )
+            for item in generations:
+                logger.info(
+                    "correction candidate stage=%s text=%r model_confidence=%.4f "
+                    "accepted=%s rank_score=%.4f",
+                    runner.stage,
+                    item.text,
+                    item.confidence,
+                    item in accepted,
+                    self._generation_rank_score(before, item),
+                )
             stage_record = {
                 "stage": runner.stage,
                 "model": runner.model_name,
@@ -361,6 +371,7 @@ class HuggingFaceCorrectionPipeline:
                     {
                         "text": item.text,
                         "confidence": round(item.confidence, 4),
+                        "rank_score": round(self._generation_rank_score(before, item), 4),
                     }
                     for item in generations
                 ],

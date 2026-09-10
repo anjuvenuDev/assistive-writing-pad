@@ -12,7 +12,8 @@ All operations are CPU-only and Raspberry Pi 4 compatible.
 from __future__ import annotations
 
 import logging
-from typing import List
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -20,11 +21,49 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class InkCropResult:
+    """Validated handwriting crop and diagnostics used by the OCR boundary."""
+
+    image: np.ndarray
+    bbox: Tuple[int, int, int, int]
+    ink_pixels: int
+    ink_coverage: float
+    original_ink_coverage: float
+    valid: bool
+    original_size: Tuple[int, int]
+
+    @property
+    def crop_size(self) -> Tuple[int, int]:
+        return self.image.shape[1], self.image.shape[0]
+
+    def __getattr__(self, name: str):
+        # Preserve the old ndarray-shaped API for callers that only inspect shape/dtype.
+        return getattr(self.image, name)
+
+
+def _as_white_background_rgb(image: np.ndarray) -> np.ndarray:
+    if image.ndim == 2:
+        gray = np.clip(image, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    if image.ndim != 3 or image.shape[2] not in (3, 4):
+        raise ValueError("OCR image must be a grayscale, RGB, or RGBA array")
+
+    source = np.clip(image, 0, 255).astype(np.uint8)
+    if source.shape[2] == 3:
+        return source.copy()
+
+    rgb = source[:, :, :3].astype(np.float32)
+    alpha = source[:, :, 3:4].astype(np.float32) / 255.0
+    composited = rgb * alpha + 255.0 * (1.0 - alpha)
+    return np.rint(composited).astype(np.uint8)
+
+
 def auto_crop_handwriting(
     image_rgb: np.ndarray,
-    padding: int = 20,
-) -> np.ndarray:
-    """Crop tightly around the handwriting content, discarding empty whitespace.
+    padding: Optional[int] = None,
+) -> InkCropResult:
+    """Detect meaningful ink and crop it with bounded, proportional padding.
 
     Empty whitespace sent to TrOCR confuses the model because it sees a very
     small ink region surrounded by irrelevant background tokens.  Cropping
@@ -32,59 +71,76 @@ def auto_crop_handwriting(
 
     Args:
         image_rgb: White-background RGB image (uint8, HxWx3).
-        padding:   Pixels of border to keep around the detected bounding box.
-                   Default 20 px gives the model some breathing room.
+        padding:   Explicit border size. If omitted, padding is proportional to
+                   the ink bounding box and clamped to a useful range.
 
     Returns:
-        Cropped RGB image, or the original image if no ink is found.
+        Crop image, bounding box, coverage, and validity diagnostics.
     """
-    h, w = image_rgb.shape[:2]
+    image = _as_white_background_rgb(image_rgb)
+    h, w = image.shape[:2]
 
-    # Convert to grayscale so we can threshold against the white background.
-    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
-    # Non-white pixels are ink.  A threshold of 250 is intentionally loose so
-    # that light-pressure strokes (which render as mid-grey) are still detected.
-    ink_mask = gray < 250
+    # Include anti-aliased/pressure-light pixels while excluding near-white noise.
+    ink_mask = (gray < 245).astype(np.uint8)
 
     total_pixels = h * w
-    ink_pixels = int(np.sum(ink_mask))
+    raw_ink_pixels = int(np.count_nonzero(ink_mask))
+    components, labels, stats, _ = cv2.connectedComponentsWithStats(ink_mask, 8)
+    min_component_pixels = max(10, int(round(total_pixels * 0.00005)))
+    meaningful = np.zeros_like(ink_mask)
+    for component in range(1, components):
+        area = int(stats[component, cv2.CC_STAT_AREA])
+        if area >= min_component_pixels:
+            meaningful[labels == component] = 1
+
+    ink_pixels = int(np.count_nonzero(meaningful))
     ink_ratio = ink_pixels / max(total_pixels, 1)
-
+    rows, cols = np.where(meaningful)
     if ink_pixels == 0:
+        if raw_ink_pixels:
+            logger.warning(
+                "auto_crop: rejected insignificant ink in %dx%d image; "
+                "large whitespace may hurt OCR accuracy (pixels=%d)",
+                w, h, raw_ink_pixels,
+            )
+        logger.info("auto_crop: no meaningful ink detected in %dx%d image", w, h)
+        return InkCropResult(image.copy(), (0, 0, w, h), 0, 0.0, 0.0, False, (w, h))
+
+    x_min, x_max = int(cols.min()), int(cols.max())
+    y_min, y_max = int(rows.min()), int(rows.max())
+    bbox_width = x_max - x_min + 1
+    bbox_height = y_max - y_min + 1
+    if ink_pixels < 16 or bbox_width < 4 or bbox_height < 4:
         logger.warning(
-            "auto_crop: no ink detected in %dx%d image -- returning original", w, h
+            "auto_crop: rejected insignificant ink in %dx%d image; "
+            "large whitespace may hurt OCR accuracy (pixels=%d bbox=%dx%d)",
+            w, h, ink_pixels, bbox_width, bbox_height,
         )
-        return image_rgb.copy()
-
-    if ink_ratio < 0.05:
-        logger.warning(
-            "auto_crop: ink covers only %.1f%% of the %dx%d image. "
-            "Large whitespace may hurt OCR accuracy.",
-            ink_ratio * 100,
-            w,
-            h,
+        return InkCropResult(
+            image.copy(), (0, 0, w, h), ink_pixels, ink_ratio, ink_ratio, False, (w, h)
         )
 
-    # Find the bounding box of all ink pixels.
-    rows, cols = np.where(ink_mask)
-    y_min = int(rows.min())
-    y_max = int(rows.max())
-    x_min = int(cols.min())
-    x_max = int(cols.max())
-
-    # Clamp padded coordinates to image boundaries.
-    y1 = max(0, y_min - padding)
-    y2 = min(h, y_max + padding + 1)
-    x1 = max(0, x_min - padding)
-    x2 = min(w, x_max + padding + 1)
-
-    cropped = image_rgb[y1:y2, x1:x2]
-    logger.debug(
-        "auto_crop: %dx%d -> %dx%d (ink %.1f%%, padding=%d)",
-        w, h, cropped.shape[1], cropped.shape[0], ink_ratio * 100, padding,
+    border = (
+        max(0, int(padding))
+        if padding is not None
+        else max(8, min(32, int(round(max(bbox_width, bbox_height) * 0.12))))
     )
-    return cropped
+    y1 = max(0, y_min - border)
+    y2 = min(h, y_max + border + 1)
+    x1 = max(0, x_min - border)
+    x2 = min(w, x_max + border + 1)
+    cropped = image[y1:y2, x1:x2].copy()
+    cropped_coverage = ink_pixels / max(cropped.shape[0] * cropped.shape[1], 1)
+    logger.debug(
+        "auto_crop: %dx%d -> %dx%d box=(%d,%d,%d,%d) ink=%d coverage=%.2f%%",
+        w, h, cropped.shape[1], cropped.shape[0], x1, y1, x2, y2,
+        ink_pixels, cropped_coverage * 100,
+    )
+    return InkCropResult(
+        cropped, (x1, y1, x2, y2), ink_pixels, cropped_coverage, ink_ratio, True, (w, h)
+    )
 
 
 def enhance_for_ocr(image_rgb: np.ndarray) -> np.ndarray:
