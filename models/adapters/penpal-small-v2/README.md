@@ -31,12 +31,10 @@ On the 81 audited pad captures, corrected exact increases 40/81 -> 45/81, but
 sentence corrected exact decreases 19/32 -> 15/32. This category regression and
 the unmet 98% gate prevent default promotion. No deployment defaults are changed.
 
-Explicit experimental use:
+Explicit experimental use (the launcher resolves and checks the adapter path):
 
 ```bash
-AWP_TROCR_MODEL=microsoft/trocr-small-handwritten \
-AWP_TROCR_ADAPTER=models/adapters/penpal-small-v2 \
-bash scripts/run_raspberry_pi.sh
+bash scripts/run_raspberry_pi_adapter.sh
 ```
 
 Reproduce training in a fresh output directory:

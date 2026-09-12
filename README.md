@@ -27,6 +27,10 @@ The candidate remains opt-in. These synthetic results do not establish dysgraphi
 handwriting accuracy or Raspberry Pi 4 latency/memory, and the 98% target remains
 unmet. Earlier experiment results below are retained as historical evidence.
 
+To try the adapter on a Raspberry Pi, run `bash scripts/run_raspberry_pi_adapter.sh`.
+The launcher checks the checkpoint files and sets the matching model and adapter
+path automatically.
+
 ## Public-data training experiment
 
 Public digital-ink dataset selection, access conditions, and the executed training
