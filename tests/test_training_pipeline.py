@@ -2,10 +2,45 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from assistive_writing_pad.recognition.adapters import install_adapter, load_adapter
+
+
+@pytest.mark.parametrize('start', [0, 2])
+def test_training_uses_checkpoint_generation_start_including_zero(start):
+    model = SimpleNamespace(config=SimpleNamespace(decoder_start_token_id=None),
+                            generation_config=SimpleNamespace(
+                                decoder_start_token_id=start, pad_token_id=1, eos_token_id=2))
+    tokenizer = SimpleNamespace(cls_token_id=99, pad_token_id=98, sep_token_id=97)
+    script('train_trocr_adapter').align_training_tokens(model, tokenizer)
+    assert model.config.decoder_start_token_id == start
+    assert model.config.pad_token_id == 1
+    assert model.config.eos_token_id == 2
+
+
+def test_sequence_loss_does_not_shift_targets_twice_and_ignores_padding():
+    torch = pytest.importorskip('torch')
+    logits = torch.tensor([[[12., 0., 0.], [0., 12., 0.], [0., 0., 12.],
+                            [12., 0., 0.]]], requires_grad=True)
+    labels = torch.tensor([[0, 1, 2, -100]])
+    loss = script('train_trocr_adapter').aligned_sequence_loss(logits, labels)
+    assert loss.item() < 0.001
+    loss.backward()
+    assert torch.count_nonzero(logits.grad[0, 3]) == 0
+    assert torch.isfinite(logits.grad).all()
+
+
+def test_transcription_targets_exclude_bos_but_keep_text_and_eos():
+    pytest.importorskip('torch')
+    def tokenizer(text, add_special_tokens):
+        assert text == 'cat'
+        assert add_special_tokens is False
+        return SimpleNamespace(input_ids=[7, 8])
+    labels = script('train_trocr_adapter').transcription_labels(tokenizer, 'cat', 2)
+    assert labels.tolist() == [[7, 8, 2]]
 
 
 def script(name):

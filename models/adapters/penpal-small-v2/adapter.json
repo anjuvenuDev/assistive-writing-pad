@@ -1,0 +1,18 @@
+{
+  "base_model": "microsoft/trocr-small-handwritten",
+  "rank": 8,
+  "alpha": 16,
+  "steps": 512,
+  "seed": 2026,
+  "batch_size": 2,
+  "learning_rate": 0.0003,
+  "selected_step": 192,
+  "selection_metric": "validation_mean_cer_then_exact",
+  "decoder_start_token_id": 2,
+  "loss_alignment": "explicit_seq2seq_cross_entropy_no_second_shift",
+  "label_format": "text_tokens_then_eos_no_leading_bos",
+  "trainable_parameters": 104448,
+  "promoted": false,
+  "status": "experimental_not_production",
+  "sha256": "d266e2d29e1fcf2663d7a943d4c2b54e4911df397494e7bff2f032c8ca7cd7d6"
+}

@@ -64,3 +64,70 @@ writer-disjoint held-out evaluation, >=98% corrected accuracy, protection agains
 meaning-changing corrections, and measured latency/memory on the physical Pi.
 None of these requirements is waived by a passing software test suite or a
 deadline. The trained adapter remains a candidate unless that evidence exists.
+
+## Follow-up: repair training alignment before expanding the corpus
+
+Inspection of the cached small checkpoint and installed Transformers implementation
+found two training defects. The checkpoint's generation start token is 2, whereas
+the old trainer used tokenizer CLS (0) when the top-level training configuration
+was unset. More seriously, the installed composite model's default loss fell back
+to causal-LM loss: decoder inputs were already right-shifted, but that loss shifted
+labels again. Low training loss under this objective did not measure correct OCR
+learning. The original 64-step checkpoint remains historical, not recommended.
+
+The trainer now matches generation special tokens (including legitimate token 0)
+and explicitly computes cross-entropy at matching decoder/target positions, ignoring
+padding. Regression tests cover both behaviors. Every 128 steps it evaluates the
+validation styles and saves the lowest validation CER checkpoint, breaking ties
+with exact accuracy. The unchanged baseline is also eligible. Test predictions
+never choose the checkpoint. Previously inspected test styles are a regression
+benchmark, not a newly untouched certification set.
+
+An intermediate 512-step run fixing only the start token selected step 128 and
+scored 8/25 validation, 3/26 test; it is rejected. Its report is preserved as
+`data/evaluation/adapter_aligned_training_report.json`. The subsequent seq2seq-loss
+run fixes both defects, using the same 149 training lines for a controlled
+comparison instead of conflating the fix with additional data.
+
+That aligned-loss run reached 12/25 validation and 11/26 test exact (baseline
+7/25 and 6/26), selecting step 512. Its report is
+`data/evaluation/adapter_seq2seq_training_report.json`. A token-level diagnostic
+then showed an additional mismatch: the tokenizer prepended BOS to labels but
+the pretrained decoder generated text immediately after its start token. On the
+first validation line, baseline teacher-forced loss was 9.887 with that extra BOS
+and 1.206 without it. The final trainer therefore tokenizes text without automatic
+special tokens and appends EOS explicitly. Decoder start is supplied separately.
+The `penpal-small-v2` experiment evaluates validation every 64 steps for 512 steps.
+
+Final v2 selects step 192: validation exact 7/25 -> 13/25, mean CER 15.0723% ->
+9.4839%; test exact 6/26 -> 10/26, mean CER 12.9432% -> 9.3904%. The CPU run took
+195.2 seconds with 940.5 MiB peak RSS. Another benchmark ran concurrently for
+part of that time, so elapsed times are not controlled performance comparisons.
+The final checkpoint, model card and full report are committed. This establishes
+an improvement on this small synthetic regression set, not >=98% accuracy or
+generalization to dysgraphic children. No new corpus was added in this follow-up:
+the controlled method comparison used the same data and excluded pad captures.
+
+### Full pad-pipeline regression check
+
+Both runs use `microsoft/trocr-small-handwritten`, FP32 CPU, default automatic
+routing and the same correction pipeline/confidence threshold (0.85), on the
+81 audited captures. Only v2 loads the adapter. Original conflicting-label ink
+remains excluded by the existing audit, not relabeled.
+
+| Exact outputs | Small baseline | Small + v2 |
+| --- | ---: | ---: |
+| Raw OCR, all captures | 36/81 | 44/81 |
+| Corrected, all captures | 40/81 | 45/81 |
+| Corrected characters | 5/25 | 11/25 |
+| Corrected words | 16/24 | 19/24 |
+| Corrected sentences | 19/32 | 15/32 |
+
+Reports: `small_baseline_manual_report.json` and `adapter_v2_manual_report.json`
+under `data/evaluation`. V2 mean corrected CER is 26.4% versus baseline 33.0%.
+V2 x86 end-to-end average/p95 is 591.9/1449.9 ms. Baseline ran partly concurrently
+with training; do not interpret timing differences as a controlled speedup.
+Both accuracy gates fail the unchanged 98% requirement. The sentence regression
+prevents default promotion despite aggregate improvement. No Pi measurements
+or child-writer-independent dysgraphia accuracy are claimed. The production
+default remains the existing base checkpoint, not the small model or adapter.

@@ -1,5 +1,32 @@
 # Assistive Writing Pad
 
+## Accuracy follow-up: corrected training alignment
+
+The new experimental `models/adapters/penpal-small-v2` checkpoint improves the
+small synthetic regression benchmark: **test character error 12.94% -> 9.39%**
+(27% relative reduction), with exact lines **6/26 -> 10/26**. Validation exact
+improves 7/25 -> 13/25. This is a controlled comparison with the same cached small
+base model and the same 149 training lines, not an increase in dataset size.
+
+Fixed training/generation start-token mismatch, doubly shifted loss targets in
+the installed library, and an unwanted leading BOS label. The 512-step CPU run
+selects step 192 by validation CER only, with the unchanged baseline eligible.
+It produces approximately 0.4 MB of adapter weights and keeps all inference local.
+All **280 tests pass**. See the [model card](models/adapters/penpal-small-v2/README.md)
+and [training review](docs/DATASET_AND_TRAINING_REVIEW.md) for reproduction and
+complete experiment history, including failed intermediate runs.
+
+On 81 audited pad captures, the same small model improves from 36/81 to 44/81
+raw exact and **40/81 to 45/81 corrected exact** with v2. Corrected words improve
+16/24 -> 19/24 and characters 5/25 -> 11/25, but sentences regress
+19/32 -> 15/32. This is why it is **not enabled by default**. The adapter run
+measured 591.9 ms average / 1449.9 ms p95 on this x86 host, not a Pi; the baseline
+ran partly alongside training, so those timings are not a controlled speedup test.
+
+The candidate remains opt-in. These synthetic results do not establish dysgraphic
+handwriting accuracy or Raspberry Pi 4 latency/memory, and the 98% target remains
+unmet. Earlier experiment results below are retained as historical evidence.
+
 ## Public-data training experiment
 
 Public digital-ink dataset selection, access conditions, and the executed training

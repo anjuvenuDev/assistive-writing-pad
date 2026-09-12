@@ -20,6 +20,8 @@ models/adapters/*
 !models/adapters/penpal-small/
 !models/adapters/penpal-small/adapter.json
 !models/adapters/penpal-small/adapter.safetensors
+!models/adapters/penpal-small-v2/
+!models/adapters/penpal-small-v2/**
 
 # Dataset drops can be large; commit only curated examples.
 data/*
