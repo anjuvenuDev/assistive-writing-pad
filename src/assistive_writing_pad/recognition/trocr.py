@@ -585,7 +585,9 @@ class TrOCRHandwritingRecognizer:
             except Exception as exc:
                 self._model = None
                 self._processor = None
-                raise RecognitionUnavailable(f"Could not load TrOCR adapter {adapter_dir!r}") from exc
+                raise RecognitionUnavailable(
+                    f"Could not load TrOCR adapter {adapter_dir!r}: {exc}"
+                ) from exc
         # The vision encoder is sensitive to dynamic INT8 activation ranges.
         # Keep it in float32; quantize only decoder Linear layers when opted in.
         self._model.decoder = optimize_cpu_model(self._model.decoder, torch)

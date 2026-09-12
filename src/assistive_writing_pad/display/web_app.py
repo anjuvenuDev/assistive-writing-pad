@@ -1747,7 +1747,13 @@ class RecognitionService:
             self._huion_started = True
         device_path = os.environ.get("AWP_HUION_DEVICE", "").strip()
         if not device_path:
-            device_path = find_huion_device() or "/dev/input/event4"
+            try:
+                device_path = find_huion_device() or "/dev/input/event4"
+            except RuntimeError as exc:
+                # Keep browser pointer input alive when the optional Linux
+                # hardware extra is missing; surface the precise install step.
+                logger.warning("Huion device discovery unavailable: %s", exc)
+                return
         try:
             self._huion_axis_ranges = huion_axis_ranges(device_path)
             logger.info(

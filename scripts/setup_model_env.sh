@@ -12,7 +12,7 @@ case "$(uname -m)" in
   x86_64) .venv/bin/python -m pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu ;;
   *) echo "Local model inference requires a 64-bit OS. Install Raspberry Pi OS 64-bit." >&2; exit 1 ;;
 esac
-.venv/bin/python -m pip install -e ".[models,dev]"
+.venv/bin/python -m pip install -e ".[models,dev,hardware]"
 
 echo "Model environment ready."
 echo "Cache OCR model: .venv/bin/python scripts/cache_hf_ocr_model.py --model microsoft/trocr-base-handwritten"

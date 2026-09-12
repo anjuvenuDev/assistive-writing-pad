@@ -404,6 +404,27 @@ def test_websocket_reconnect_does_not_start_duplicate_huion_readers(monkeypatch)
     assert starts == ["/dev/input/event4"]
 
 
+def test_missing_linux_hardware_extra_does_not_break_browser_websocket(monkeypatch, caplog) -> None:
+    monkeypatch.delenv("AWP_HUION_DEVICE", raising=False)
+    monkeypatch.setattr(
+        "assistive_writing_pad.display.web_app.find_huion_device",
+        lambda: (_ for _ in ()).throw(RuntimeError(
+            "evdev is not installed. Install the hardware extra with `pip install -e '.[hardware]'`."
+        )),
+    )
+    service = RecognitionService(
+        recognizer=StubStrokeGroupRecognizer(),
+        corrector=WarmableCorrector(),
+        settings=RuntimeSettings(contextual_model_enabled=False),
+    )
+
+    service.start_huion_reader()
+
+    assert service._huion_thread is None
+    assert service.websocket_snapshot()["type"] == "snapshot"
+    assert "pip install -e '.[hardware]'" in caplog.text
+
+
 def test_evaluation_capture_page_has_labeling_controls() -> None:
     assert 'id="caseId"' in CAPTURE_HTML
     assert 'id="category"' in CAPTURE_HTML
