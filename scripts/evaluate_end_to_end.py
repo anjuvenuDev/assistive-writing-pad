@@ -6,6 +6,9 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import json
+import os
+import platform
+import resource
 from pathlib import Path
 import sys
 import time
@@ -85,7 +88,7 @@ def main() -> int:
     parser.add_argument(
         "--confidence-threshold",
         type=float,
-        default=0.65,
+        default=RuntimeSettings.confidence_threshold,
         help="Count outputs below this confidence as low-confidence cases.",
     )
     parser.add_argument(
@@ -182,7 +185,25 @@ def main() -> int:
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        payload = report.to_dict()
+        peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        payload["runtime"] = {
+            "machine": platform.machine(), "system": platform.system(),
+            "python": platform.python_version(), "device_profile": settings.device_profile,
+            "ocr_model": args.model, "ocr_beams": recognizer.num_beams,
+            "ocr_adapter": os.environ.get("AWP_TROCR_ADAPTER", ""),
+            "correction_beams": settings.hf_correction_num_beams,
+            "confidence_threshold": settings.confidence_threshold,
+            "dynamic_int8": os.environ.get("AWP_DYNAMIC_INT8", "0"),
+            "torch_threads": os.environ.get("AWP_TORCH_THREADS", "default_max_4"),
+            "warm_up_ms": round(warm_up_ms, 2),
+            "peak_process_rss_mib": round(
+                peak_rss / (1024 * 1024 if platform.system() == "Darwin" else 1024), 2
+            ),
+            "manifest": str(args.manifest),
+            "note": "Process RSS includes warm-up; not total device RAM. Latency excludes UI debounce.",
+        }
+        args.output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Wrote {args.output}")
 
     gate_failures = end_to_end_gate_failures(

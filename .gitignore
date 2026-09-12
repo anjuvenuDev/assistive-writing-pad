@@ -15,6 +15,11 @@ venv/
 # Model artifacts are documented but not committed by default.
 models/*
 !models/README.md
+!models/adapters/
+models/adapters/*
+!models/adapters/penpal-small/
+!models/adapters/penpal-small/adapter.json
+!models/adapters/penpal-small/adapter.safetensors
 
 # Dataset drops can be large; commit only curated examples.
 data/*
@@ -32,6 +37,11 @@ data/*
 !data/evaluation/readiness_report.json
 !data/evaluation/recognition_cases.jsonl
 !data/evaluation/recognition_report.json
+!data/training/
+data/training/*
+!data/training/penpal/
+!data/training/penpal/*.json
+!data/training/penpal/*.jsonl
 
 # Local alternate git directory used in this sandbox.
 .git-local/

@@ -1,0 +1,20 @@
+{
+  "input_cases": 83,
+  "benchmark_cases": 81,
+  "excluded": [
+    {
+      "id": "char_w",
+      "reason": "identical_ink_conflicting_labels"
+    },
+    {
+      "id": "char_x",
+      "reason": "identical_ink_conflicting_labels"
+    }
+  ],
+  "categories": {
+    "single_character": 25,
+    "word": 24,
+    "sentence": 32
+  },
+  "note": "Original captures are preserved. No labels were inferred or rewritten."
+}

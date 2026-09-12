@@ -1,5 +1,106 @@
 # Assistive Writing Pad
 
+## Public-data training experiment
+
+Public digital-ink dataset selection, access conditions, and the executed training
+procedure are documented in [the dataset review](docs/DATASET_AND_TRAINING_REVIEW.md).
+A real CPU fine-tuning run trained a 104,448-parameter LoRA adapter for
+`microsoft/trocr-small-handwritten`: 149 training lines, 25 validation lines and
+26 test lines, with disjoint synthetic style IDs and evaluation-text exclusions.
+The 64-step run completed in 66.9 seconds (including cached-encoder preparation
+and evaluations), with 1007.3 MiB peak process RSS. Validation exact improved from
+7/25 to 8/25, but held-out test exact regressed from 6/26 to 5/26. This fails the
+accuracy target and is a reason not to promote the candidate. Loaded through the
+full OCR/correction path, it scored 4/8 on the separate public fixtures, averaging
+426.4 ms with 628.2 ms p95 and 1941.9 MiB peak process RSS on this laptop. These
+measurements do not establish Raspberry Pi performance.
+
+The small adapter checkpoint, all 200 source-derived stroke records, split
+fingerprints and before/after predictions are included for reproducibility.
+The candidate is **not promoted** to the default recognizer. Loading it explicitly
+requires `AWP_TROCR_MODEL=microsoft/trocr-small-handwritten` and
+`AWP_TROCR_ADAPTER=models/adapters/penpal-small`. Checkpoint loading validates the
+base model, SHA-256, tensor names, shapes and finite weights.
+
+Training reports and software tests do not establish production readiness for
+dysgraphic handwriting on a Pi 4. The requested >=98% accuracy and target-device
+latency/memory requirements remain unmet; no test threshold was lowered.
+
+## September 2026 implementation and measured limits
+
+The latest tablet/sample changes from `origin/main` were merged, preserving the
+existing local whole-line OCR edits. The combined capture manifest has 83 cases:
+23 existing and 60 unique incoming captures. One exact duplicate was omitted;
+colliding IDs were renamed with a `huion_` prefix. Two captures contain identical
+ink labeled both `w` and `x`; originals are preserved and the audit excludes both
+from accuracy measurement. The resulting benchmark has 81 cases. Eight additional
+public synthetic [Penpal](https://huggingface.co/datasets/breitburg/penpal) samples
+are stored separately in `data/evaluation/penpal_holdout_cases.jsonl`.
+
+Implemented in this update:
+
+- Huion pen-up triggers automatic recognition after 350 ms, retaining pen-down points.
+- Browser requests carry the exact stroke snapshot and reject stale results.
+- Browser and Tk recognition requests are coalesced; model warm-up and inference are serialized.
+- Completed line images reuse bounded cached OCR candidates; identical requests reuse results.
+- Failed correction remains retryable and is visibly flagged for review.
+- Dense tablet sampling no longer disables single-character routing.
+- Line OCR preserves numbers, mixed tokens such as `3rd`, and punctuation.
+- Strong unchanged-word model candidates prevent weaker spelling rewrites.
+- Grammar correction rejects unrelated content-word substitutions.
+- Raster drawing uses pixel-equivalent array operations; CPU inference is limited to four threads.
+- Optional decoder/correction INT8 inference uses QNNPACK on ARM64; the vision encoder stays float32.
+
+**This is not a near-perfect or real-time-validated Pi release.** The float CPU
+benchmark before the final correction guard changes scored 43/81 exact recognition,
+40/81 exact corrected output, 2427.6 ms average, and 4859.3 ms p95. Its peak process
+RSS was 3172 MiB on this x86 laptop. Earlier decoder/correction INT8 testing retained
+43/81 raw exact matches and reduced average latency to 1288.9 ms, but peak loading
+RSS reached 3822 MiB. These are laptop measurements, not Pi measurements. Strict
+corrected exact matching includes punctuation. The latest final INT8 report is
+`data/evaluation/manual_int8_report.json`; reports include runtime configuration.
+After the final correction guards, that report scored **45/81 corrected exact
+(55.6%)**, with **1294.5 ms average / 2397.3 ms p95** and **3806.6 MiB peak process
+RSS**. The eight fresh Penpal fixtures scored **2/8 corrected exact**, averaging
+1274.8 ms with 2047.3 ms p95 (`data/evaluation/penpal_holdout_report.json`). They
+comprise two synthetic lines and six word crops, not eight independent writers.
+Both accuracy and latency gates failed; no benchmark threshold was relaxed.
+Final automated verification: **276 tests passed**. Source/tests and changed
+evaluation scripts pass Ruff; shell launch/setup scripts pass syntax checks.
+
+All inference remains local, as required for the Pi 4 / 4 GB deployment. INT8 is
+opt-in because accuracy and startup memory must be checked on the device. Do not
+assume that quantization reduces peak loading memory or that this model stack
+fits alongside Raspberry Pi OS and a browser. No physical Pi or tablet verification
+was available in this session. Browser-controller unit and HTTP streaming tests
+are automated; a real browser visual check remains unverified.
+
+Reproduce the audited benchmark:
+
+```bash
+.venv/bin/python scripts/audit_handwriting_samples.py \
+  --output data/evaluation/sample_audit.json \
+  --cases-output /tmp/awp-audited-cases.jsonl
+AWP_DYNAMIC_INT8=1 .venv/bin/python scripts/evaluate_end_to_end.py \
+  --local-files-only --manifest /tmp/awp-audited-cases.jsonl \
+  --output data/evaluation/manual_int8_report.json \
+  --max-p95-total-latency-ms 2000
+```
+
+For Raspberry Pi OS **64-bit**, install with `bash scripts/setup_model_env.sh`,
+cache the models using the commands below, then run:
+
+```bash
+bash scripts/run_raspberry_pi.sh
+# Optional experiment, not an accuracy-approved deployment setting:
+AWP_DYNAMIC_INT8=1 bash scripts/run_raspberry_pi.sh
+```
+
+The launcher preloads models sequentially and defaults to offline cached model
+files. Internet access is needed only for installation/model caching. Historical
+smoke scores below describe earlier small datasets and must not be treated as
+evidence of current general handwriting accuracy.
+
 Real-time handwriting recognition and intelligent correction system for children with
 dysgraphia.
 
@@ -549,7 +650,7 @@ AWP_TROCR_LOCAL_FILES_ONLY=0
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=0
 AWP_PRELOAD_OCR_MODEL=1
 AWP_PRELOAD_CORRECTION_MODELS=1
-AWP_WORD_SEGMENT=1
+AWP_WORD_SEGMENT=0
 AWP_TROCR_NUM_BEAMS=2
 AWP_TROCR_CANDIDATES=2
 AWP_HF_CORRECTION_NUM_BEAMS=6
@@ -567,7 +668,7 @@ AWP_TROCR_LOCAL_FILES_ONLY=1
 AWP_HF_CORRECTION_LOCAL_FILES_ONLY=1
 AWP_PRELOAD_OCR_MODEL=0
 AWP_PRELOAD_CORRECTION_MODELS=0
-AWP_WORD_SEGMENT=1
+AWP_WORD_SEGMENT=0
 AWP_TROCR_NUM_BEAMS=1
 AWP_TROCR_CANDIDATES=1
 AWP_HF_CORRECTION_NUM_BEAMS=2

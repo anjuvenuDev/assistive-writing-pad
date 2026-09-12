@@ -1,6 +1,7 @@
 """Model-scored semantic correction for real-word errors."""
 
 from __future__ import annotations
+from assistive_writing_pad.config.cpu_runtime import configure_cpu, optimize_cpu_model
 
 from dataclasses import dataclass, field
 import logging
@@ -109,6 +110,7 @@ class HFMaskedLMSemanticScorer:
             from transformers import AutoModelForMaskedLM, AutoTokenizer
 
             self._torch = torch
+            configure_cpu(torch)
             self._device = resolve_device(self.device, torch)
             self._tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
@@ -122,6 +124,8 @@ class HFMaskedLMSemanticScorer:
             )
             self._model.to(self._device)
             self._model.eval()
+            if self._device == "cpu":
+                self._model = optimize_cpu_model(self._model, torch)
         except Exception as exc:  # pragma: no cover - depends on local model env/cache.
             raise ModelCorrectionUnavailable(f"could not load {self.model_name}: {exc}") from exc
 

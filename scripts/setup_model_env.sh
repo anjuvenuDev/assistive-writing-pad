@@ -3,11 +3,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PYTHON_BIN="${PYTHON_BIN:-/home/anj/.pyenv/versions/3.10.12/bin/python}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 "$PYTHON_BIN" -m venv .venv
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
-.venv/bin/python -m pip install torch==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+case "$(uname -m)" in
+  aarch64|arm64) .venv/bin/python -m pip install 'torch>=2.6,<3' ;;
+  x86_64) .venv/bin/python -m pip install 'torch>=2.6,<3' --index-url https://download.pytorch.org/whl/cpu ;;
+  *) echo "Local model inference requires a 64-bit OS. Install Raspberry Pi OS 64-bit." >&2; exit 1 ;;
+esac
 .venv/bin/python -m pip install -e ".[models,dev]"
 
 echo "Model environment ready."

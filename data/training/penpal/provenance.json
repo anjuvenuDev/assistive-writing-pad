@@ -1,0 +1,40 @@
+{
+  "dataset": "https://huggingface.co/datasets/breitburg/penpal",
+  "license": "MIT",
+  "offset": 1000,
+  "requested_rows": 200,
+  "source": "synthetic",
+  "splits": {
+    "train": {
+      "count": 149,
+      "styles": {
+        "3": 21,
+        "0": 20,
+        "5": 17,
+        "7": 20,
+        "8": 12,
+        "1": 17,
+        "6": 15,
+        "4": 15,
+        "2": 12
+      },
+      "sha256": "b661a9d7d5f0de494fd5495633c86f3f1f9685425d98c91bbafeef982893e7b0"
+    },
+    "validation": {
+      "count": 25,
+      "styles": {
+        "9": 10,
+        "10": 15
+      },
+      "sha256": "8deca417d1797e4f3b5eea007c48d7406ce880fb432ffd69168f022c0e534b9d"
+    },
+    "test": {
+      "count": 26,
+      "styles": {
+        "11": 16,
+        "12": 10
+      },
+      "sha256": "bbefbe279a1c67e6c449f049c062619d585dfc6900322f066e79a5513006b775"
+    }
+  }
+}

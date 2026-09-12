@@ -53,10 +53,12 @@ class WritingPipeline:
 
         correction = self._correct_recognition(recognition)
         logger.info("CORRECTED: %s", correction.corrected_text)
+        correction_failed = correction.confidence <= 0.0 or bool(correction.metadata.get("errors"))
         return PipelineResult(
             recognition=recognition,
             correction=correction,
-            needs_review=False,
+            needs_review=correction_failed,
+            review_reason="correction_unavailable" if correction_failed else None,
         )
 
     def _select_recognition_hypothesis(

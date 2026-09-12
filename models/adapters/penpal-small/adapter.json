@@ -1,0 +1,13 @@
+{
+  "base_model": "microsoft/trocr-small-handwritten",
+  "rank": 8,
+  "alpha": 16,
+  "steps": 64,
+  "seed": 2026,
+  "batch_size": 2,
+  "learning_rate": 0.0003,
+  "trainable_parameters": 104448,
+  "promoted": false,
+  "status": "experimental_not_production",
+  "sha256": "ada4e50458f4331b15a75580372598c92cc1ddb4ed5fb4dbf4e32db2e7035ab4"
+}

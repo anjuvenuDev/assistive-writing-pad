@@ -157,6 +157,8 @@ class HandwritingApp:
         self.recognition_job: Optional[str] = None
         self.recognition_sequence = 0
         self.recognition_lock = threading.Lock()
+        self.recognition_in_flight = False
+        self.recognition_queued = False
         self.alternatives: List[TextAlternative] = []
         self.alternative_index = 0
         self.rendering_alternatives = False
@@ -318,7 +320,8 @@ class HandwritingApp:
         if not callable(loader):
             return
         try:
-            loader()
+            with self.recognition_lock:
+                loader()
             logger.info("Tk OCR model warmed up")
         except Exception as exc:
             logger.warning("Tk OCR warm-up failed; first recognition may retry: %s", exc)
@@ -328,12 +331,17 @@ class HandwritingApp:
         if not callable(warm_up):
             return
         try:
-            warm_up()
+            with self.recognition_lock:
+                warm_up()
             logger.info("Tk correction models warmed up")
         except Exception as exc:
             logger.warning("Tk correction warm-up failed; first correction may retry: %s", exc)
 
     def _start_stroke(self, event: tk.Event) -> None:
+        self._next_sequence()
+        if self.recognition_job is not None:
+            self.root.after_cancel(self.recognition_job)
+            self.recognition_job = None
         self.current_stroke = []
         self.stroke_started_at = time.monotonic()
         self.last_x = float(event.x)
@@ -375,10 +383,15 @@ class HandwritingApp:
     def _schedule_recognition(self) -> None:
         if self.recognition_job is not None:
             self.root.after_cancel(self.recognition_job)
-        self.recognition_job = self.root.after(700, self.recognize_all_ink)
+        self.recognition_job = self.root.after(350, self.recognize_all_ink)
 
     def recognize_all_ink(self) -> None:
         self.recognition_job = None
+        if self.current_stroke:
+            return
+        if self.recognition_in_flight:
+            self.recognition_queued = True
+            return
         if not self.strokes:
             self.status.set("Write on the pad first.")
             self.recognition_confidence.set("Recognition: -")
@@ -389,6 +402,7 @@ class HandwritingApp:
         stroke_snapshot = tuple(tuple(stroke) for stroke in self.strokes if stroke)
         self.status.set("Recognizing...")
         self._set_busy(True)
+        self.recognition_in_flight = True
         threading.Thread(
             target=self._recognize_worker,
             args=(sequence, stroke_snapshot),
@@ -411,13 +425,24 @@ class HandwritingApp:
                 )
         except RecognitionUnavailable as exc:
             self.root.after(0, self._apply_error, sequence, str(exc))
+            self.root.after(0, self._recognition_finished)
             return
         except Exception as exc:
             logger.exception("Tk recognition failed")
             self.root.after(0, self._apply_error, sequence, f"Recognition failed: {exc}")
+            self.root.after(0, self._recognition_finished)
             return
 
         self.root.after(0, self._apply_pipeline_result, sequence, pipeline_result, alternatives)
+        self.root.after(0, self._recognition_finished)
+
+    def _recognition_finished(self) -> None:
+        self.recognition_in_flight = False
+        self._set_busy(False)
+        if self.recognition_queued:
+            self.recognition_queued = False
+            if self.strokes and not self.current_stroke:
+                self._schedule_recognition()
 
     def _recognize_stroke_groups(
         self,

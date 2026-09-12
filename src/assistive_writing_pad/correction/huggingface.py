@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import difflib
 from functools import lru_cache
+from assistive_writing_pad.config.cpu_runtime import configure_cpu, optimize_cpu_model
 import json
 import logging
 import math
@@ -159,6 +160,7 @@ class HFSeq2SeqCorrectionRunner:
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
             self._torch = torch
+            configure_cpu(torch)
             self._device = resolve_device(self.device, torch)
             tokenizer_source = self.tokenizer_name or MODEL_TOKENIZERS.get(
                 self.model_name,
@@ -176,6 +178,8 @@ class HFSeq2SeqCorrectionRunner:
             )
             self._model.to(self._device)
             self._model.eval()
+            if self._device == "cpu":
+                self._model = optimize_cpu_model(self._model, torch)
         except Exception as exc:  # pragma: no cover - depends on local model env/cache.
             raise ModelCorrectionUnavailable(f"could not load {self.model_name}: {exc}") from exc
 
@@ -410,6 +414,21 @@ class HuggingFaceCorrectionPipeline:
                     stage=runner.stage,
                 )
             ]
+            # A high-probability generation that preserves the words is evidence
+            # for leaving them alone. Do not discard it for adding a period and
+            # then choose a much weaker, meaning-changing beam instead.
+            unchanged_words = [
+                item for item in generations
+                if normalized_word_tokens(before) == normalized_word_tokens(item.text)
+                and not has_trailing_quote_artifact(before)
+            ]
+            if unchanged_words:
+                unchanged_confidence = max(item.confidence for item in unchanged_words)
+                accepted = [
+                    item for item in accepted
+                    if normalize_generated_text(before) == normalize_generated_text(item.text)
+                    or item.confidence > unchanged_confidence
+                ]
             accepted.sort(
                 key=lambda item: self._generation_rank_score(before, item),
                 reverse=True,
@@ -500,6 +519,8 @@ class HuggingFaceCorrectionPipeline:
         if is_unrequested_punctuation_or_case_only_change(original, candidate):
             return False
         if stage == "spelling" and not is_probable_spelling_change(original, candidate):
+            return False
+        if stage == "grammar" and not preserves_grammar_content(original, candidate):
             return False
         return is_acceptable_model_output(
             original,
@@ -831,9 +852,48 @@ def is_unrequested_punctuation_or_case_only_change(original: str, candidate: str
     if has_trailing_quote_artifact(cleaned_original):
         return False
 
-    original_without_terminal = TERMINAL_PUNCTUATION_RE.sub("", cleaned_original)
-    candidate_without_terminal = TERMINAL_PUNCTUATION_RE.sub("", cleaned_candidate)
-    return candidate_without_terminal.lower() == original_without_terminal.lower()
+    # Identical word tokens also catch a hallucinated leading quote or comma.
+    return True
+
+
+def preserves_grammar_content(original: str, candidate: str) -> bool:
+    """Allow function-word and inflection fixes, reject unrelated content rewrites.
+
+    Semantic alternatives belong to the separately scored closed-set semantic
+    stage. A fluent grammar generation is not evidence for changing a noun.
+    """
+    function_words = set(
+        "a an the am is are was were be been being do does did have has had "
+        "to of in on at for from by with as and or but if then than that this "
+        "these those it its i you he she we they me him her us them my your "
+        "his our their there not no will would can could should shall may might".split()
+    )
+    left, right = normalized_word_tokens(original), normalized_word_tokens(candidate)
+    matcher = difflib.SequenceMatcher(a=left, b=right, autojunk=False)
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        before, after = left[left_start:left_end], right[right_start:right_end]
+        if all(token in function_words for token in before + after):
+            continue
+        if tag != "replace" or len(before) != len(after):
+            return False
+        for source, target in zip(before, after):
+            if source in function_words and target in function_words:
+                continue
+            # Preserve inflection changes without allowing free substitution.
+            def stems(word):
+                values = {word}
+                for suffix in ('s', 'es', 'ed', 'ing'):
+                    if word.endswith(suffix) and len(word) > len(suffix) + 1:
+                        base = word[:-len(suffix)]
+                        values.update((base, base + 'e'))
+                        if len(base) > 2 and base[-1] == base[-2]:
+                            values.add(base[:-1])
+                return values
+            if not stems(source).intersection(stems(target)):
+                return False
+    return True
 
 
 def has_terminal_punctuation(text: str) -> bool:

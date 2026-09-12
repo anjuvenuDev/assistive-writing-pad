@@ -146,7 +146,7 @@ def test_single_character_candidates_use_dot_hint_for_i() -> None:
 
 class StubTrOCRRecognizer(TrOCRHandwritingRecognizer):
     def __init__(self, outputs):
-        super().__init__(num_beams=3, num_return_sequences=3)
+        super().__init__(num_beams=3, num_return_sequences=3, word_segment_enabled=True)
         self.outputs = list(outputs)
 
     def _ensure_loaded(self) -> None:
@@ -159,7 +159,7 @@ class StubTrOCRRecognizer(TrOCRHandwritingRecognizer):
 
 class BatchStubTrOCRRecognizer(TrOCRHandwritingRecognizer):
     def __init__(self, outputs):
-        super().__init__(num_beams=3, num_return_sequences=3)
+        super().__init__(num_beams=3, num_return_sequences=3, word_segment_enabled=True)
         self.outputs = outputs
         self.batch_sizes = []
 

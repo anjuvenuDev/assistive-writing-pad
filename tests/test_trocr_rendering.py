@@ -71,6 +71,18 @@ def test_trocr_accepts_explicit_cache_and_local_files_only(tmp_path) -> None:
     assert recognizer.local_files_only is True
 
 
+def test_trocr_uses_whole_line_recognition_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("AWP_WORD_SEGMENT", raising=False)
+
+    assert TrOCRHandwritingRecognizer().word_segment_enabled is False
+
+
+def test_trocr_can_enable_experimental_word_segmentation(monkeypatch) -> None:
+    monkeypatch.setenv("AWP_WORD_SEGMENT", "1")
+
+    assert TrOCRHandwritingRecognizer().word_segment_enabled is True
+
+
 def test_trocr_reads_local_files_only_from_env(monkeypatch) -> None:
     monkeypatch.setenv("AWP_TROCR_LOCAL_FILES_ONLY", "1")
 

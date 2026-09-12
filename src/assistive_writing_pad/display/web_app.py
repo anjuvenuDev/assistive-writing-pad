@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
+from copy import deepcopy
+from dataclasses import asdict
 import base64
 import hashlib
 import json
@@ -10,6 +13,7 @@ import logging
 import os
 import socket
 import threading
+import time
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -551,6 +555,7 @@ HTML = """<!doctype html>
         return;
       }
       if (event.type === "snapshot") {
+        strokeRevision += 1;
         strokes = (event.strokes || []).map(stroke => stroke.map(point => (
           event.coordinate_space === "normalized"
             ? canvasPointFromNormalized(
@@ -569,6 +574,11 @@ HTML = """<!doctype html>
         return;
       }
       if (event.type === "clear") {
+        strokeRevision += 1;
+        recognitionQueued = false;
+        if (recognizeTimer) clearTimeout(recognizeTimer);
+        recognizedEl.value = "";
+        renderCorrections([]);
         strokes = [];
         currentStroke = [];
         drawing = false;
@@ -578,12 +588,22 @@ HTML = """<!doctype html>
         return;
       }
       if (event.type === "stroke_start") {
+        strokeRevision += 1;
+        if (recognizeTimer) clearTimeout(recognizeTimer);
         if (currentStroke.length) strokes.push(currentStroke);
         currentStroke = [];
         drawing = true;
         last = null;
         statusEl.textContent = event.source === "huion" ? "Huion pen down" : "Writing";
         if (event.source === "huion") logMsg("Huion: Connected / Stroke active");
+        if (event.source === "huion" && event.x != null && event.y != null) {
+          const point = huionCanvasPoint(event);
+          if (point) {
+            drawRemotePoint(point);
+            currentStroke.push(point);
+            last = point;
+          }
+        }
         return;
       }
       if (event.type === "stroke_point") {
@@ -612,12 +632,14 @@ HTML = """<!doctype html>
       }
       if (event.type === "stroke_end") {
         if (currentStroke.length) strokes.push(currentStroke);
+        strokeRevision += 1;
         currentStroke = [];
         drawing = false;
         last = null;
         pdDrawing.textContent = "no";
         pdDrawing.className = "drawing-no";
         pdStrokes.textContent = strokes.length;
+        scheduleRecognition();
       }
     }
 
@@ -707,6 +729,8 @@ HTML = """<!doctype html>
                   " y:", event.clientY.toFixed(1));
 
       drawing = true;
+      strokeRevision += 1;
+      if (recognizeTimer) clearTimeout(recognizeTimer);
       startedAt = performance.now();
       currentStroke = [];
       currentStrokeId = "browser-" + event.pointerId + "-" + Date.now();
@@ -848,6 +872,7 @@ HTML = """<!doctype html>
     }
 
     async function recognize() {
+      if (drawing) return;
       if (!strokes.length) {
         statusEl.textContent = "Write on the pad first.";
         return;
@@ -866,11 +891,11 @@ HTML = """<!doctype html>
         const response = await fetch("/api/recognize", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({mode: currentMode})
+          body: JSON.stringify({strokes: strokes, mode: currentMode})
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
-        if (requestRevision === strokeRevision) {
+        if (requestRevision === strokeRevision && !drawing) {
           applyRecognitionResult(result);
         } else {
           recognitionQueued = true;
@@ -1479,6 +1504,8 @@ class RecognitionService:
             settings=self.settings,
         )
         self._state_lock = threading.RLock()
+        self._inference_lock = threading.RLock()
+        self._result_cache = OrderedDict()
         self._strokes: List[List[StrokePoint]] = []
         self._active_strokes: Dict[str, List[StrokePoint]] = {}
         self._websocket_clients: set[socket.socket] = set()
@@ -1506,7 +1533,8 @@ class RecognitionService:
         if not callable(loader):
             return
         try:
-            loader()
+            with self._inference_lock:
+                loader()
             logger.info("OCR model warmed up")
         except Exception as exc:
             logger.warning("OCR model warm-up failed; first recognition may retry: %s", exc)
@@ -1516,12 +1544,44 @@ class RecognitionService:
         if not callable(warm_up):
             return
         try:
-            warm_up()
+            with self._inference_lock:
+                warm_up()
             logger.info("correction models warmed up")
         except Exception as exc:
             logger.warning("correction model warm-up failed; first correction may retry: %s", exc)
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        started = time.perf_counter()
+        if not isinstance(payload, dict):
+            raise ValueError("recognition payload must be an object")
+        if "strokes" not in payload:
+            payload = dict(payload, strokes=[
+                [asdict(point) for point in stroke] for stroke in self.stroke_snapshot()
+            ])
+        # Hash the snapshot; cache candidates/results only, never stroke payloads.
+        key = hashlib.sha256(json.dumps(
+            {"strokes": payload["strokes"], "mode": payload.get("mode", "auto")},
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode()).digest()
+        with self._inference_lock:
+            cached = self._result_cache.get(key)
+            if cached is not None:
+                self._result_cache.move_to_end(key)
+                result = deepcopy(cached)
+                result.setdefault("metadata", {})["result_cache_hit"] = "true"
+            else:
+                result = self._recognize_payload(payload)
+                # Failed correction must be retryable when models become available.
+                if (result.get("correction_confidence", 0) > 0
+                        and not result.get("correction_metadata", {}).get("errors")):
+                    self._result_cache[key] = deepcopy(result)
+                    while len(self._result_cache) > 16:
+                        self._result_cache.popitem(last=False)
+                result.setdefault("metadata", {})["result_cache_hit"] = "false"
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        return result
+
+    def _recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if "strokes" in payload:
             stroke_groups = stroke_groups_from_payload(payload)
         else:
@@ -1796,7 +1856,8 @@ class RecognitionService:
         if not isinstance(text, str):
             raise ValueError("text must be a string")
 
-        correction = self.pipeline.corrector.correct(text)
+        with self._inference_lock:
+            correction = self.pipeline.corrector.correct(text)
         return {
             "text": correction.corrected_text,
             "recognized_text": text,
@@ -1853,7 +1914,7 @@ def corrections_payload(result: CorrectionResult) -> List[Dict[str, Any]]:
 
 def status_message(result: PipelineResult) -> str:
     if result.needs_review:
-        return "Best match ready."
+        return "Please check this reading."
     if result.correction.changed:
         return "Writing corrected."
     return "Writing recognized."
@@ -2050,6 +2111,8 @@ def make_handler(service: RecognitionService):
 
             try:
                 length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > 8 * 1024 * 1024:
+                    raise ValueError("request body must be between 1 byte and 8 MiB")
                 payload = json.loads(self.rfile.read(length).decode("utf-8"))
                 if self.path == "/api/recognize":
                     result = service.recognize_payload(payload)

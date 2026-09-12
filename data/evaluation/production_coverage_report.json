@@ -1,0 +1,52 @@
+{
+  "total_cases": 83,
+  "manual_cases": 81,
+  "by_category": {
+    "sentence": 32,
+    "single_character": 27,
+    "word": 24
+  },
+  "by_source": {
+    "manual": 81,
+    "smoke": 2
+  },
+  "passed": false,
+  "findings": [
+    {
+      "requirement": "single_character.min_cases",
+      "actual": 27,
+      "expected": 20,
+      "passed": true
+    },
+    {
+      "requirement": "single_character.min_manual_cases",
+      "actual": 25,
+      "expected": 20,
+      "passed": true
+    },
+    {
+      "requirement": "word.min_cases",
+      "actual": 24,
+      "expected": 50,
+      "passed": false
+    },
+    {
+      "requirement": "word.min_manual_cases",
+      "actual": 24,
+      "expected": 50,
+      "passed": false
+    },
+    {
+      "requirement": "sentence.min_cases",
+      "actual": 32,
+      "expected": 50,
+      "passed": false
+    },
+    {
+      "requirement": "sentence.min_manual_cases",
+      "actual": 32,
+      "expected": 50,
+      "passed": false
+    }
+  ]
+}

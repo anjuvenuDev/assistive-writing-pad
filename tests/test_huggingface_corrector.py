@@ -2,6 +2,7 @@ import json
 from typing import Dict, Sequence
 
 from assistive_writing_pad.correction.huggingface import (
+    preserves_grammar_content,
     GeneratedCorrection,
     HuggingFaceCorrectionPipeline,
     ModelCorrectionUnavailable,
@@ -17,6 +18,22 @@ from assistive_writing_pad.correction.huggingface import (
     normalize_generated_text,
     repair_ocr_fragments,
 )
+
+
+def test_grammar_preserves_content_words_and_accepts_inflections():
+    assert not preserves_grammar_content('I have a blue pen', 'I have a blue eye')
+    assert not preserves_grammar_content('She likes the dog', 'She likes the cat')
+    assert preserves_grammar_content('He go to school', 'He goes to school')
+    assert preserves_grammar_content('There book is on table', 'There is a book on the table')
+
+
+def test_strong_unchanged_words_beat_weak_spelling_rewrite():
+    runner = FakeRunner(stage='spelling', outputs={'I have a blue pen': [
+        generated('I have a blue pen.', .97, 'spelling'),
+        generated('I have a blue open.', .42, 'spelling'),
+    ]})
+    result = HuggingFaceCorrectionPipeline(spelling_runner=runner).correct('I have a blue pen')
+    assert result.corrected_text == 'I have a blue pen'
 
 
 class FakeRunner:

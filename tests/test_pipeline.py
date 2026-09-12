@@ -54,7 +54,7 @@ def test_pipeline_flags_low_confidence_recognition_for_review() -> None:
 
     assert result.needs_review is True
     assert result.review_reason == "recognition_confidence_below_threshold"
-    assert result.correction.corrected_text == "the cat sat on a chair"
+    assert result.correction.corrected_text == "teh cat sat on a chaier"
 
 
 def test_pipeline_does_not_fail_when_correction_model_fails() -> None:
@@ -65,7 +65,8 @@ def test_pipeline_does_not_fail_when_correction_model_fails() -> None:
 
     result = pipeline.process_strokes([])
 
-    assert result.needs_review is False
+    assert result.needs_review is True
+    assert result.review_reason == "correction_unavailable"
     assert result.correction.corrected_text == "the cat"
     assert result.correction.confidence == 0.0
 

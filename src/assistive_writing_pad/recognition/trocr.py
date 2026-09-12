@@ -15,9 +15,9 @@ AWP_DEBUG_OCR
     Set to "1" to save raw/cropped/processed images to data/debug/ on every
     recognition call.  Off by default.
 AWP_WORD_SEGMENT
-    Set to "0" to disable stroke-geometry word segmentation before OCR.  Each
-    detected word is recognized independently and results are joined with
-    spaces.  On by default for better sentence spacing.
+    Set to "1" to enable experimental stroke-geometry word segmentation before
+    OCR. Whole-line recognition is the default because connected handwriting
+    does not provide reliable word boundaries at pen-stroke level.
 AWP_TROCR_NUM_BEAMS
     Beam count for TrOCR generation (default: 2). Set to 1 on constrained
     devices if latency is more important than alternatives.
@@ -36,11 +36,12 @@ AWP_OCR_MODE
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import os
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence, Tuple
@@ -48,6 +49,7 @@ from typing import Dict, List, Literal, Optional, Sequence, Tuple
 import numpy as np
 
 from assistive_writing_pad.config.settings import huggingface_cache_dir_from_env
+from assistive_writing_pad.config.cpu_runtime import configure_cpu, optimize_cpu_model
 from assistive_writing_pad.contracts import RecognitionResult, StrokePoint
 
 logger = logging.getLogger(__name__)
@@ -69,7 +71,6 @@ _DEFAULT_RENDER_W = 768
 _DEFAULT_RENDER_H = 256
 
 # Whether stroke-geometry word segmentation is enabled.
-_WORD_SEGMENT_ENABLED: bool = os.environ.get("AWP_WORD_SEGMENT", "1").strip() != "0"
 _DEFAULT_NUM_BEAMS = 2
 _DEFAULT_NUM_CANDIDATES = 2
 _DEFAULT_MAX_WORD_SEGMENTS = 6
@@ -164,6 +165,7 @@ class TrOCRHandwritingRecognizer:
     num_beams: int = _int_env("AWP_TROCR_NUM_BEAMS", _DEFAULT_NUM_BEAMS)
     num_return_sequences: int = _int_env("AWP_TROCR_CANDIDATES", _DEFAULT_NUM_CANDIDATES)
     max_word_segments: int = _int_env("AWP_TROCR_MAX_WORD_SEGMENTS", _DEFAULT_MAX_WORD_SEGMENTS)
+    word_segment_enabled: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if self.cache_dir is None:
@@ -177,9 +179,15 @@ class TrOCRHandwritingRecognizer:
         self.num_beams = max(1, int(self.num_beams))
         self.num_return_sequences = max(1, min(int(self.num_return_sequences), self.num_beams))
         self.max_word_segments = max(1, int(self.max_word_segments))
+        if self.word_segment_enabled is None:
+            self.word_segment_enabled = _bool_env("AWP_WORD_SEGMENT", False)
         self._processor = None
         self._model = None
         self._torch = None
+        # Store candidates only, never images/stroke histories. Completed lines
+        # can be reused as the next line grows, without rerunning the encoder.
+        self._image_cache = OrderedDict()
+        self.image_cache_size = max(0, _int_env("AWP_OCR_IMAGE_CACHE_SIZE", 64))
 
     def recognize(self, strokes: Sequence[StrokePoint], mode: RecognitionMode = "auto") -> RecognitionResult:
         if not strokes:
@@ -241,7 +249,7 @@ class TrOCRHandwritingRecognizer:
         for line_index, line_groups in enumerate(lines):
             word_groups = [line_groups]
             segmentation = "line"
-            if _WORD_SEGMENT_ENABLED and requested_mode in {"auto", "word"}:
+            if self.word_segment_enabled and requested_mode in {"auto", "word", "ocr"}:
                 segmented_groups = segment_strokes_into_words(line_groups)
                 if 1 < len(segmented_groups) <= self.max_word_segments:
                     word_groups = segmented_groups
@@ -325,7 +333,7 @@ class TrOCRHandwritingRecognizer:
                 "mode": effective_mode,
                 "requested_mode": requested_mode,
                 "top3": json.dumps(_top_payload(final_candidates)),
-                "word_segmentation": "enabled" if _WORD_SEGMENT_ENABLED else "disabled",
+                "word_segmentation": "enabled" if self.word_segment_enabled else "disabled",
                 "confidence_method": "mean_selected_token_probability",
             },
         )
@@ -415,13 +423,31 @@ class TrOCRHandwritingRecognizer:
     ) -> List[List[_OCRCandidate]]:
         """Preprocess and recognize one line's segments in a single model batch."""
 
-        images = []
-        for stroke_groups, debug_label in recognition_groups:
+        images, pending = [], []
+        results = [[] for _ in recognition_groups]
+        for index, (stroke_groups, debug_label) in enumerate(recognition_groups):
             raw_image = render_stroke_groups_for_trocr(stroke_groups)
-            proc_image, cropped_image, processed_image = _preprocess_image(raw_image)
-            save_debug_images(raw_image, cropped_image, processed_image, label=debug_label)
+            proc_image, crop_result, processed_image = _preprocess_image(raw_image)
+            save_debug_images(raw_image, crop_result.image, processed_image, label=debug_label)
+            if not crop_result.valid:
+                continue
+            key = (self.model_name, self.num_beams, self.num_return_sequences,
+                   self.max_new_tokens, proc_image.shape,
+                   hashlib.sha256(proc_image.tobytes()).digest())
+            if key in self._image_cache:
+                self._image_cache.move_to_end(key)
+                results[index] = list(self._image_cache[key])
+                continue
             images.append(proc_image)
-        return self._run_ocr_batch(images)
+            pending.append((index, key))
+        decoded = self._run_ocr_batch(images) if images else []
+        for (index, key), candidates in zip(pending, decoded):
+            results[index] = candidates
+            if candidates and self.image_cache_size:
+                self._image_cache[key] = tuple(candidates)
+                while len(self._image_cache) > self.image_cache_size:
+                    self._image_cache.popitem(last=False)
+        return results
 
     def _run_ocr_batch(self, images: Sequence[np.ndarray]) -> List[List[_OCRCandidate]]:
         if not images:
@@ -443,7 +469,7 @@ class TrOCRHandwritingRecognizer:
         if self.num_return_sequences > 1:
             generation_kwargs["num_return_sequences"] = self.num_return_sequences
 
-        with self._torch.no_grad():
+        with self._torch.inference_mode():
             generated = self._model.generate(inputs.pixel_values, **generation_kwargs)
 
         raw_texts = self._processor.batch_decode(
@@ -518,6 +544,7 @@ class TrOCRHandwritingRecognizer:
             ) from exc
 
         self._torch = torch
+        configure_cpu(torch)
         self._device = torch.device("cpu")
         load_kwargs = {
             "cache_dir": str(self.cache_dir) if self.cache_dir is not None else None,
@@ -550,6 +577,18 @@ class TrOCRHandwritingRecognizer:
         self._assert_fully_materialized()
         self._model.to(self._device)
         self._model.eval()
+        adapter_dir = os.environ.get("AWP_TROCR_ADAPTER", "").strip()
+        if adapter_dir:
+            from assistive_writing_pad.recognition.adapters import load_adapter
+            try:
+                load_adapter(self._model, adapter_dir, self.model_name)
+            except Exception as exc:
+                self._model = None
+                self._processor = None
+                raise RecognitionUnavailable(f"Could not load TrOCR adapter {adapter_dir!r}") from exc
+        # The vision encoder is sensitive to dynamic INT8 activation ranges.
+        # Keep it in float32; quantize only decoder Linear layers when opted in.
+        self._model.decoder = optimize_cpu_model(self._model.decoder, torch)
         self._assert_cpu_runtime()
 
     def _assert_fully_materialized(self) -> None:
@@ -921,9 +960,8 @@ def _draw_line(image: np.ndarray, start: tuple, end: tuple, radius: int) -> None
 
 def _draw_dot(image: np.ndarray, x: int, y: int, radius: int) -> None:
     height, width, _channels = image.shape
-    for row in range(max(0, y - radius), min(height, y + radius + 1)):
-        for col in range(max(0, x - radius), min(width, x + radius + 1)):
-            image[row, col] = 0
+    image[max(0, y - radius):min(height, y + radius + 1),
+          max(0, x - radius):min(width, x + radius + 1)] = 0
 
 
 def _generation_confidence(generated, torch_module) -> float:
@@ -1041,7 +1079,9 @@ def _decoded_candidates(
     seen: Dict[str, _OCRCandidate] = {}
     for index, raw_text in enumerate(raw_texts):
         confidence = confidences[index] if index < len(confidences) else 0.0
-        text = _clean_ocr_text(raw_text).strip()
+        # Line output may legitimately contain punctuation, numbers, and mixed
+        # tokens ("3rd", "Pi4"). Alphabet-only cleanup belongs to character mode.
+        text = " ".join(raw_text.split())
         key = text.lower()
         existing = seen.get(key)
         candidate = _OCRCandidate(text=text, confidence=confidence, raw_text=raw_text.strip())
@@ -1208,8 +1248,8 @@ def _clamp_confidence(value: float) -> float:
 def _looks_like_single_character_input(stroke_groups: Sequence[Sequence[StrokePoint]]) -> bool:
     if not stroke_groups:
         return False
-    total_points = sum(len(stroke) for stroke in stroke_groups)
-    if len(stroke_groups) > 3 or total_points > 220:
+    # Tablet sampling frequency must not decide whether ink is a character.
+    if len(stroke_groups) > 3:
         return False
 
     points = [point for stroke in stroke_groups for point in stroke]
