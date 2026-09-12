@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import logging
+import os
+import socket
 import threading
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
 
+from assistive_writing_pad.capture.huion_reader import HuionEventReader
+from assistive_writing_pad.capture.huion_probe import find_huion_device, huion_axis_ranges
 from assistive_writing_pad.config.settings import RuntimeSettings
 from assistive_writing_pad.contracts import CorrectionResult, PipelineResult, StrokePoint
 from assistive_writing_pad.correction.factory import corrector_from_settings
@@ -299,6 +306,7 @@ HTML = """<!doctype html>
       <canvas id="pad"></canvas>
       <div class="toolbar">
         <button class="primary" id="recognize">Read Again</button>
+        <button id="captureHuion">Connect Huion</button>
         <button id="clearScreen">Clear Screen</button>
       </div>
     </section>
@@ -343,6 +351,7 @@ HTML = """<!doctype html>
     const confidenceEl = document.getElementById("confidence");
     const recognizedEl = document.getElementById("recognized");
     const rawTextEl    = document.getElementById("raw-text");
+    const captureHuionEl = document.getElementById("captureHuion");
     const correctionConfidenceEl = document.getElementById("correction-confidence");
     const correctionListEl = document.getElementById("correction-list");
     const pdType       = document.getElementById("pd-type");
@@ -356,14 +365,19 @@ HTML = """<!doctype html>
      * --------------------------------------------------------------------- */
     let strokes        = [];    // completed strokes sent to OCR
     let currentStroke  = [];    // points in the stroke currently being drawn
+    let currentStrokeId = null;
     let drawing        = false;
     let last           = null;  // last canvas-space point {x, y, ...}
     let startedAt      = 0;     // performance.now() at stroke start
     let recognizeTimer = null;
-    let currentMode    = "auto";
+    let currentMode = "auto";
     let strokeRevision = 0;
     let recognitionInFlight = false;
     let recognitionQueued = false;
+    let inputSocket = null;
+    let inputSocketRetry = null;
+    let huionDiagnosticPointCount = 0;
+    let huionCanvasDiagnosticShown = false;
 
     /* -----------------------------------------------------------------------
      * Diagnostics logger
@@ -467,6 +481,182 @@ HTML = """<!doctype html>
       };
     }
 
+    function canvasPointFromNormalized(nx, ny, metadata = {}) {
+      const rect = canvas.getBoundingClientRect();
+      const point = {
+        x: Math.max(0, Math.min(1, Number(nx))) * rect.width,
+        y: Math.max(0, Math.min(1, Number(ny))) * rect.height,
+        timestamp_ms: Number(metadata.timestamp_ms || 0),
+        pressure: Number(metadata.pressure || 1)
+      };
+      if (!huionCanvasDiagnosticShown) {
+        huionCanvasDiagnosticShown = true;
+        console.info(
+          "[AWP] Canvas: width=%s height=%s css_width=%s css_height=%s dpr=%s",
+          canvas.width,
+          canvas.height,
+          rect.width.toFixed(1),
+          rect.height.toFixed(1),
+          window.devicePixelRatio || 1
+        );
+      }
+      return point;
+    }
+
+    function huionCanvasPoint(event) {
+      if (event.coordinate_space === "normalized") {
+        const nx = Math.max(0, Math.min(1, Number(event.x)));
+        const ny = Math.max(0, Math.min(1, Number(event.y)));
+        const point = canvasPointFromNormalized(nx, ny, {
+          timestamp_ms: Number(event.timestamp_ms || 0),
+          pressure: Number(event.pressure || 1)
+        });
+        huionDiagnosticPointCount += 1;
+        if (huionDiagnosticPointCount === 1 || huionDiagnosticPointCount % 100 === 0) {
+          const rect = canvas.getBoundingClientRect();
+          console.debug(
+            "[AWP] Huion BROWSER normalized=(%s,%s) canvas=(%s,%s) " +
+            "css=%sx%s bitmap=%sx%s dpr=%s",
+            nx.toFixed(4), ny.toFixed(4),
+            point.x.toFixed(1), point.y.toFixed(1),
+            rect.width.toFixed(1), rect.height.toFixed(1),
+            canvas.width, canvas.height,
+            window.devicePixelRatio || 1
+          );
+        }
+        return point;
+      }
+      console.warn("[AWP] Ignoring Huion point without normalized coordinate_space");
+      return null;
+    }
+
+    function drawRemotePoint(point) {
+      const radius = 3;
+      if (last) {
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(point.x, point.y);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function handleInputEvent(event) {
+      if (event.source === "browser") return;
+      if (event.type === "test_point") {
+        drawRemotePoint({x: Number(event.x), y: Number(event.y)});
+        logMsg("Huion test point received");
+        return;
+      }
+      if (event.type === "snapshot") {
+        strokes = (event.strokes || []).map(stroke => stroke.map(point => (
+          event.coordinate_space === "normalized"
+            ? canvasPointFromNormalized(
+                Number(point.x),
+                Number(point.y),
+                point
+              )
+            : null
+        )).filter(Boolean));
+        currentStroke = [];
+        drawing = false;
+        last = null;
+        drawCapturedStrokes();
+        pdStrokes.textContent = strokes.length;
+        logMsg("Huion: Connected / Stroke complete / Points: " + strokes.flat().length);
+        return;
+      }
+      if (event.type === "clear") {
+        strokes = [];
+        currentStroke = [];
+        drawing = false;
+        last = null;
+        clearCanvasPixels();
+        pdStrokes.textContent = "0";
+        return;
+      }
+      if (event.type === "stroke_start") {
+        if (currentStroke.length) strokes.push(currentStroke);
+        currentStroke = [];
+        drawing = true;
+        last = null;
+        statusEl.textContent = event.source === "huion" ? "Huion pen down" : "Writing";
+        if (event.source === "huion") logMsg("Huion: Connected / Stroke active");
+        return;
+      }
+      if (event.type === "stroke_point") {
+        const point = event.source === "huion"
+          ? huionCanvasPoint(event)
+          : {x: Number(event.x), y: Number(event.y),
+             pressure: Number(event.pressure || 1),
+             timestamp_ms: Number(event.timestamp_ms || 0)};
+        if (!point) return;
+        if (!drawing) {
+          drawing = true;
+          currentStroke = [];
+        }
+        drawRemotePoint(point);
+        currentStroke.push(point);
+        last = point;
+        pdType.textContent = event.source || "browser";
+        pdX.textContent = point.x.toFixed(1);
+        pdY.textContent = point.y.toFixed(1);
+        pdDrawing.textContent = "yes";
+        pdDrawing.className = "drawing-yes";
+        if (event.source === "huion") {
+          statusEl.textContent = "WebSocket: Connected | Huion: Drawing | Points: " + currentStroke.length;
+        }
+        return;
+      }
+      if (event.type === "stroke_end") {
+        if (currentStroke.length) strokes.push(currentStroke);
+        currentStroke = [];
+        drawing = false;
+        last = null;
+        pdDrawing.textContent = "no";
+        pdDrawing.className = "drawing-no";
+        pdStrokes.textContent = strokes.length;
+      }
+    }
+
+    function sendInputEvent(event) {
+      if (inputSocket && inputSocket.readyState === WebSocket.OPEN) {
+        inputSocket.send(JSON.stringify(event));
+      }
+    }
+
+    function connectInputSocket() {
+      if (inputSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(inputSocket.readyState)) {
+        return;
+      }
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      inputSocket = new WebSocket(protocol + "//" + window.location.host + "/ws/input");
+      inputSocket.onopen = () => {
+        statusEl.textContent = "WebSocket: Connected | Huion: Waiting";
+        logMsg("WebSocket connected");
+        console.log("[AWP] Huion WebSocket connected");
+      };
+      inputSocket.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+          console.log("[AWP] Huion WebSocket message:", event.type);
+          handleInputEvent(event);
+        } catch (err) {
+          logMsg("WebSocket message error: " + err.message);
+        }
+      };
+      inputSocket.onerror = () => {
+        logMsg("WebSocket connection error");
+      };
+      inputSocket.onclose = () => {
+        logMsg("WebSocket disconnected");
+        if (inputSocketRetry) clearTimeout(inputSocketRetry);
+        inputSocketRetry = setTimeout(connectInputSocket, 1000);
+      };
+    }
+
     /** Refresh the pointer diagnostics panel. */
     function updatePointerDebug(event, isDrawing) {
       const rect = canvas.getBoundingClientRect();
@@ -519,8 +709,14 @@ HTML = """<!doctype html>
       drawing = true;
       startedAt = performance.now();
       currentStroke = [];
+      currentStrokeId = "browser-" + event.pointerId + "-" + Date.now();
       last = canvasPoint(event);
       currentStroke.push(last);
+      sendInputEvent({
+        type: "stroke_start",
+        stroke_id: currentStrokeId,
+        x: last.x, y: last.y, pressure: last.pressure, timestamp_ms: last.timestamp_ms
+      });
 
       // Rule A: capture pointer.
       try {
@@ -567,6 +763,12 @@ HTML = """<!doctype html>
 
       currentStroke.push(point);
       last = point;
+      sendInputEvent({
+        type: "stroke_point",
+        stroke_id: currentStrokeId,
+        x: point.x, y: point.y, pressure: point.pressure,
+        timestamp_ms: point.timestamp_ms
+      });
 
       event.preventDefault();  // Rule C
     }
@@ -589,10 +791,19 @@ HTML = """<!doctype html>
       if (!drawing) return;
 
       drawing = false;
-      currentStroke.push(canvasPoint(event));
+      const endPoint = canvasPoint(event);
+      currentStroke.push(endPoint);
+      sendInputEvent({
+        type: "stroke_point",
+        stroke_id: currentStrokeId,
+        x: endPoint.x, y: endPoint.y, pressure: endPoint.pressure,
+        timestamp_ms: endPoint.timestamp_ms
+      });
+      sendInputEvent({type: "stroke_end", stroke_id: currentStrokeId});
       strokes.push(currentStroke);
       strokeRevision += 1;
       currentStroke = [];
+      currentStrokeId = null;
       last = null;
 
       updatePointerDebug(event, false);
@@ -607,6 +818,33 @@ HTML = """<!doctype html>
     function scheduleRecognition() {
       if (recognizeTimer) clearTimeout(recognizeTimer);
       recognizeTimer = setTimeout(recognize, 350);
+    }
+
+    function drawCapturedStrokes() {
+      if (!strokes.length) return;
+      clearCanvasPixels();
+      for (const stroke of strokes) {
+        if (!stroke.length) continue;
+        ctx.beginPath();
+        stroke.forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.stroke();
+      }
+    }
+
+    function clearCanvasPixels() {
+      const ratio = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      applyDrawingStyle();
+    }
+
+    async function captureFromHuion() {
+      connectInputSocket();
     }
 
     async function recognize() {
@@ -628,7 +866,7 @@ HTML = """<!doctype html>
         const response = await fetch("/api/recognize", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({strokes, mode: currentMode})
+          body: JSON.stringify({mode: currentMode})
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Recognition failed");
@@ -752,18 +990,14 @@ HTML = """<!doctype html>
       currentStroke = [];
       strokeRevision += 1;
       recognitionQueued = false;
+      sendInputEvent({type: "clear"});
       if (recognizeTimer) {
         clearTimeout(recognizeTimer);
         recognizeTimer = null;
       }
 
       // Clear at device-pixel scale (identity transform), then re-apply DPR.
-      const ratio = window.devicePixelRatio || 1;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      applyDrawingStyle();
+      clearCanvasPixels();
 
       recognizedEl.value = "";
       resetConfidenceBadge();
@@ -809,11 +1043,13 @@ HTML = """<!doctype html>
 
     // Toolbar buttons
     document.getElementById("recognize").addEventListener("click", recognize);
+    captureHuionEl.addEventListener("click", connectInputSocket);
     document.getElementById("clearScreen").addEventListener("click", clearScreen);
 
     // Initial canvas setup.
     resizeCanvas();
     renderCorrections([]);
+    connectInputSocket();
   </script>
 </body>
 </html>
@@ -906,6 +1142,7 @@ CAPTURE_HTML = """<!doctype html>
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     #status { color: var(--muted); font-size: 14px; }
+    #huion-status { color: var(--muted); font-size: 12px; margin-top: 6px; }
     #message { margin-top: 12px; font-size: 14px; color: var(--muted); }
     #message.ok { color: var(--good); }
     #message.err { color: var(--bad); }
@@ -918,7 +1155,10 @@ CAPTURE_HTML = """<!doctype html>
 <body>
   <header>
     <h1>Evaluation Capture</h1>
-    <div id="status">0 strokes</div>
+    <div>
+      <div id="status">0 strokes</div>
+      <div id="huion-status">Huion: Disconnected</div>
+    </div>
   </header>
   <main>
     <section>
@@ -961,6 +1201,9 @@ CAPTURE_HTML = """<!doctype html>
     let drawing = false;
     let last = null;
     let startedAt = 0;
+    let inputSocket = null;
+    let inputSocketRetry = null;
+    let huionPointCount = 0;
 
     function applyDrawingStyle() {
       ctx.lineWidth = 4;
@@ -998,8 +1241,114 @@ CAPTURE_HTML = """<!doctype html>
       };
     }
 
+    function normalizedCanvasPoint(x, y, metadata = {}) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, Number(x))) * rect.width,
+        y: Math.max(0, Math.min(1, Number(y))) * rect.height,
+        timestamp_ms: Number(metadata.timestamp_ms || 0),
+        pressure: Number(metadata.pressure || 1)
+      };
+    }
+
+    function drawPoint(point) {
+      if (last) {
+        ctx.beginPath();
+        ctx.moveTo(last.x, last.y);
+        ctx.lineTo(point.x, point.y);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      last = point;
+    }
+
+    function startHuionStroke() {
+      if (currentStroke.length) strokes.push(currentStroke);
+      currentStroke = [];
+      drawing = true;
+      last = null;
+      huionStatusEl.textContent = "Huion: Active";
+      console.info("[capture] Huion stroke start");
+    }
+
+    function finishHuionStroke() {
+      if (currentStroke.length) strokes.push(currentStroke);
+      currentStroke = [];
+      drawing = false;
+      last = null;
+      updateStatus();
+      huionStatusEl.textContent = "Huion: Connected";
+      console.info("[capture] Huion stroke end");
+    }
+
+    function handleHuionMessage(event) {
+      if (event.type === "snapshot") {
+        return;
+      }
+      if (event.type === "clear") {
+        clearScreen();
+        return;
+      }
+      if (event.type === "stroke_start" && event.source === "huion") {
+        startHuionStroke();
+        return;
+      }
+      if (event.type === "stroke_end" && event.source === "huion") {
+        finishHuionStroke();
+        return;
+      }
+      if (event.type !== "stroke_point" || event.source !== "huion") return;
+      if (event.coordinate_space !== "normalized") {
+        console.warn("[capture] Ignoring Huion point without normalized coordinates");
+        return;
+      }
+      const point = normalizedCanvasPoint(event.x, event.y, event);
+      huionPointCount += 1;
+      if (huionPointCount === 1 || huionPointCount % 100 === 0) {
+        console.info(
+          "[capture] Huion point received x=%s y=%s pressure=%s",
+          point.x.toFixed(1), point.y.toFixed(1), point.pressure.toFixed(3)
+        );
+      }
+      if (!drawing) startHuionStroke();
+      drawPoint(point);
+      currentStroke.push(point);
+      huionStatusEl.textContent = "Huion: Active";
+    }
+
+    function connectHuionSocket() {
+      if (inputSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(inputSocket.readyState)) {
+        return;
+      }
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      inputSocket = new WebSocket(protocol + "//" + window.location.host + "/ws/input");
+      inputSocket.onopen = () => {
+        huionStatusEl.textContent = "Huion: Connected";
+        console.info("[capture] Huion WebSocket connected");
+      };
+      inputSocket.onmessage = message => {
+        try {
+          handleHuionMessage(JSON.parse(message.data));
+        } catch (err) {
+          console.warn("[capture] malformed WebSocket message", err);
+        }
+      };
+      inputSocket.onerror = () => {
+        huionStatusEl.textContent = "Huion: Disconnected";
+      };
+      inputSocket.onclose = () => {
+        huionStatusEl.textContent = "Huion: Disconnected";
+        if (inputSocketRetry) clearTimeout(inputSocketRetry);
+        inputSocketRetry = setTimeout(connectHuionSocket, 1000);
+      };
+    }
+
     function start(event) {
       if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (drawing) finishHuionStroke();
       drawing = true;
       startedAt = performance.now();
       currentStroke = [];
@@ -1012,12 +1361,8 @@ CAPTURE_HTML = """<!doctype html>
     function move(event) {
       if (!drawing) return;
       const point = canvasPoint(event);
-      ctx.beginPath();
-      ctx.moveTo(last.x, last.y);
-      ctx.lineTo(point.x, point.y);
-      ctx.stroke();
+      drawPoint(point);
       currentStroke.push(point);
-      last = point;
       event.preventDefault();
     }
 
@@ -1025,7 +1370,9 @@ CAPTURE_HTML = """<!doctype html>
       try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
       if (!drawing) return;
       drawing = false;
-      currentStroke.push(canvasPoint(event));
+      const point = canvasPoint(event);
+      drawPoint(point);
+      currentStroke.push(point);
       strokes.push(currentStroke);
       currentStroke = [];
       last = null;
@@ -1080,6 +1427,8 @@ CAPTURE_HTML = """<!doctype html>
     function clearScreen() {
       strokes = [];
       currentStroke = [];
+      drawing = false;
+      last = null;
       const ratio = window.devicePixelRatio || 1;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = "#ffffff";
@@ -1091,6 +1440,10 @@ CAPTURE_HTML = """<!doctype html>
     }
 
     window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("beforeunload", () => {
+      if (inputSocket) inputSocket.close();
+      if (inputSocketRetry) clearTimeout(inputSocketRetry);
+    });
     canvas.addEventListener("pointerdown", start);
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", finish);
@@ -1101,6 +1454,8 @@ CAPTURE_HTML = """<!doctype html>
     window.assistiveWritingPadCapture = { exportStrokePayload, strokeCount: () => strokes.length };
     resizeCanvas();
     updateStatus();
+    const huionStatusEl = document.getElementById("huion-status");
+    connectHuionSocket();
   </script>
 </body>
 </html>
@@ -1115,12 +1470,26 @@ class RecognitionService:
         settings: Optional[RuntimeSettings] = None,
     ) -> None:
         self.settings = settings or RuntimeSettings.from_env()
-        self.recognizer = recognizer or TrOCRHandwritingRecognizer()
+        self.recognizer = recognizer or TrOCRHandwritingRecognizer(
+            device_profile=self.settings.device_profile
+        )
         self.pipeline = WritingPipeline(
             recognizer=self.recognizer,
             corrector=corrector or corrector_from_settings(self.settings),
             settings=self.settings,
         )
+        self._state_lock = threading.RLock()
+        self._strokes: List[List[StrokePoint]] = []
+        self._active_strokes: Dict[str, List[StrokePoint]] = {}
+        self._websocket_clients: set[socket.socket] = set()
+        self._huion_thread: Optional[threading.Thread] = None
+        self._huion_started = False
+        self._last_input_source = "unknown"
+        self._huion_axis_ranges = (
+            (0.0, _HUION_MAX_X),
+            (0.0, _HUION_MAX_Y),
+        )
+        self._huion_point_count = 0
 
     def warm_up_async(self) -> None:
         if self.settings.preload_ocr_model:
@@ -1153,8 +1522,30 @@ class RecognitionService:
             logger.warning("correction model warm-up failed; first correction may retry: %s", exc)
 
     def recognize_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        stroke_groups = stroke_groups_from_payload(payload)
+        if "strokes" in payload:
+            stroke_groups = stroke_groups_from_payload(payload)
+        else:
+            stroke_groups = self.stroke_snapshot()
+        if not any(stroke_groups):
+            raise ValueError("Write on the pad first.")
+        point_count = sum(len(stroke) for stroke in stroke_groups)
+        all_points = [point for stroke in stroke_groups for point in stroke]
+        bbox = (
+            min(point.x for point in all_points),
+            min(point.y for point in all_points),
+            max(point.x for point in all_points),
+            max(point.y for point in all_points),
+        )
+        logger.info(
+            "recognition input: source=%s strokes=%d points=%d bbox=(%.1f,%.1f,%.1f,%.1f)",
+            self._last_input_source,
+            len(stroke_groups),
+            point_count,
+            *bbox,
+        )
         # Accept legacy mode values, but recognition always uses OCR.
+        # The browser explicitly requests OCR mode; omitted mode remains a
+        # backward-compatible API default for existing callers.
         mode = payload.get("mode", "auto")
         if mode not in ("auto", "character", "word", "ocr"):
             mode = "ocr"
@@ -1182,6 +1573,222 @@ class RecognitionService:
             "metadata": selected_recognition.metadata,
             "top3": top3,
             "mode": selected_recognition.metadata.get("mode", mode),
+        }
+
+    def stroke_snapshot(self) -> List[List[StrokePoint]]:
+        with self._state_lock:
+            strokes = [list(stroke) for stroke in self._strokes]
+            strokes.extend(list(stroke) for stroke in self._active_strokes.values() if stroke)
+            return strokes
+
+    def clear_strokes(self) -> None:
+        with self._state_lock:
+            self._strokes.clear()
+            self._active_strokes.clear()
+        self._broadcast_websocket({"type": "clear"})
+
+    def ingest_stroke_event(self, event: Dict[str, Any], source: str) -> None:
+        event_type = str(event.get("type", ""))
+        stroke_id = str(event.get("stroke_id") or f"{source}-{uuid.uuid4().hex}")
+        outbound = dict(event)
+        outbound["source"] = source
+        outbound["stroke_id"] = stroke_id
+        if (
+            source == "huion"
+            and event_type in {"stroke_start", "stroke_point"}
+            and "x" in event
+            and "y" in event
+        ):
+            self._huion_point_count += 1
+            x, y = _huion_to_normalized(
+                float(event["x"]),
+                float(event["y"]),
+                axis_ranges=self._huion_axis_ranges,
+            )
+            outbound["x"] = x
+            outbound["y"] = y
+            outbound["coordinate_space"] = "normalized"
+            if self._huion_point_count == 1 or self._huion_point_count % 100 == 0:
+                logger.info(
+                    "[HUION RAW] x=%.1f y=%.1f | [SERVER POINT] x=%.4f y=%.4f | "
+                    "[WEBSOCKET POINT] x=%.4f y=%.4f",
+                    float(event["x"]),
+                    float(event["y"]),
+                    x,
+                    y,
+                    x,
+                    y,
+                )
+            if _near_mapping_edge(x) or _near_mapping_edge(y):
+                logger.info(
+                    "Huion corner diagnostic: raw=(%.1f,%.1f) normalized=(%.4f,%.4f)",
+                    float(event["x"]),
+                    float(event["y"]),
+                    x,
+                    y,
+                )
+        with self._state_lock:
+            self._last_input_source = source
+            if event_type == "stroke_start":
+                self._active_strokes[stroke_id] = []
+                if "x" in event and "y" in event:
+                    x, y = (
+                        _huion_to_normalized(
+                            float(event["x"]),
+                            float(event["y"]),
+                            axis_ranges=self._huion_axis_ranges,
+                        )
+                        if source == "huion"
+                        else (float(event["x"]), float(event["y"]))
+                    )
+                    self._active_strokes[stroke_id].append(
+                        StrokePoint(
+                            x=x,
+                            y=y,
+                            pressure=float(event.get("pressure", 1.0)),
+                            timestamp_ms=int(event.get("timestamp_ms", 0)),
+                        )
+                    )
+            elif event_type == "stroke_point":
+                try:
+                    x, y = (
+                        _huion_to_normalized(
+                            float(event["x"]),
+                            float(event["y"]),
+                            axis_ranges=self._huion_axis_ranges,
+                        )
+                        if source == "huion"
+                        else (float(event["x"]), float(event["y"]))
+                    )
+                    point = StrokePoint(
+                        x=x,
+                        y=y,
+                        pressure=float(event.get("pressure", 1.0)),
+                        timestamp_ms=int(event.get("timestamp_ms", 0)),
+                    )
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError("invalid stroke point") from exc
+                self._active_strokes.setdefault(stroke_id, []).append(point)
+            elif event_type == "stroke_end":
+                stroke = self._active_strokes.pop(stroke_id, [])
+                if stroke:
+                    self._strokes.append(stroke)
+            elif event_type == "clear":
+                self._strokes.clear()
+                self._active_strokes.clear()
+            else:
+                raise ValueError(f"unsupported stroke event: {event_type}")
+        self._broadcast_websocket(outbound)
+
+    def start_huion_reader(self) -> None:
+        with self._state_lock:
+            if self._huion_started:
+                return
+            self._huion_started = True
+        device_path = os.environ.get("AWP_HUION_DEVICE", "").strip()
+        if not device_path:
+            device_path = find_huion_device() or "/dev/input/event4"
+        try:
+            self._huion_axis_ranges = huion_axis_ranges(device_path)
+            logger.info(
+                "Huion axis ranges: X %.0f..%.0f, Y %.0f..%.0f",
+                self._huion_axis_ranges[0][0],
+                self._huion_axis_ranges[0][1],
+                self._huion_axis_ranges[1][0],
+                self._huion_axis_ranges[1][1],
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Could not read Huion axis ranges from %s; using defaults: %s",
+                device_path,
+                exc,
+            )
+        logger.info("Huion input device: %s", device_path)
+        self._huion_thread = threading.Thread(
+            target=self._read_huion,
+            args=(device_path,),
+            daemon=True,
+            name="huion-reader",
+        )
+        self._huion_thread.start()
+        logger.info("Huion reader: STARTED")
+
+    def _read_huion(self, device_path: str) -> None:
+        try:
+            for event in HuionEventReader(device_path).iter_stroke_events():
+                self.ingest_stroke_event(event, source="huion")
+        except Exception:
+            logger.exception("Huion reader stopped on %s", device_path)
+        finally:
+            logger.info("Huion reader stopped on %s", device_path)
+
+    def register_websocket(self, connection: socket.socket) -> None:
+        with self._state_lock:
+            self._websocket_clients.add(connection)
+
+    def unregister_websocket(self, connection: socket.socket) -> None:
+        with self._state_lock:
+            self._websocket_clients.discard(connection)
+
+    def _broadcast_websocket(self, event: Dict[str, Any]) -> None:
+        payload = json.dumps(event, separators=(",", ":")).encode("utf-8")
+        dead: List[socket.socket] = []
+        with self._state_lock:
+            clients = list(self._websocket_clients)
+        for client in clients:
+            try:
+                client.sendall(_websocket_frame(payload))
+            except OSError:
+                dead.append(client)
+        for client in dead:
+            self.unregister_websocket(client)
+
+    def websocket_snapshot(self) -> Dict[str, Any]:
+        return {
+            "type": "snapshot",
+            "coordinate_space": "normalized",
+            "strokes": [
+                [
+                    {
+                        "x": point.x,
+                        "y": point.y,
+                        "pressure": point.pressure,
+                        "timestamp_ms": point.timestamp_ms,
+                    }
+                    for point in stroke
+                ]
+                for stroke in self.stroke_snapshot()
+            ],
+        }
+
+    def capture_huion_payload(self) -> Dict[str, Any]:
+        device_path = os.environ.get("AWP_HUION_DEVICE", "/dev/input/event4").strip()
+        duration = _float_env("AWP_HUION_CAPTURE_SECONDS", 15.0)
+        idle_timeout = _float_env("AWP_HUION_IDLE_SECONDS", 2.0)
+        if not device_path:
+            raise ValueError("AWP_HUION_DEVICE must not be empty")
+        if duration <= 0 or idle_timeout <= 0:
+            raise ValueError("Huion capture timeouts must be positive")
+
+        strokes = HuionEventReader(device_path).capture_strokes(
+            duration_seconds=duration,
+            idle_timeout_seconds=idle_timeout,
+        )
+        return {
+            "source": "huion",
+            "device": device_path,
+            "strokes": [
+                [
+                    {
+                        "x": point.x,
+                        "y": point.y,
+                        "timestamp_ms": point.timestamp_ms,
+                        "pressure": point.pressure,
+                    }
+                    for point in stroke
+                ]
+                for stroke in strokes
+            ],
         }
 
     def correct_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1252,6 +1859,38 @@ def status_message(result: PipelineResult) -> str:
     return "Writing recognized."
 
 
+_HUION_MAX_X = 32000.0
+_HUION_MAX_Y = 20400.0
+def _huion_to_normalized(
+    x: float,
+    y: float,
+    *,
+    axis_ranges: tuple[tuple[float, float], tuple[float, float]] = (
+        (0.0, _HUION_MAX_X),
+        (0.0, _HUION_MAX_Y),
+    ),
+) -> tuple[float, float]:
+    (min_x, max_x), (min_y, max_y) = axis_ranges
+    normalized_x = _clamp_unit((x - min_x) / (max_x - min_x))
+    normalized_y = _clamp_unit((y - min_y) / (max_y - min_y))
+    logger.debug(
+        "Huion mapping raw=(%.1f,%.1f) normalized=(%.4f,%.4f)",
+        x,
+        y,
+        normalized_x,
+        normalized_y,
+    )
+    return normalized_x, normalized_y
+
+
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _near_mapping_edge(value: float, tolerance: float = 0.05) -> bool:
+    return value <= tolerance or value >= 1.0 - tolerance
+
+
 def stroke_groups_from_payload(payload: Dict[str, Any]) -> List[List[StrokePoint]]:
     raw_strokes = payload.get("strokes")
     if raw_strokes is None:
@@ -1284,11 +1923,53 @@ def stroke_groups_from_payload(payload: Dict[str, Any]) -> List[List[StrokePoint
     return stroke_groups
 
 
+def _websocket_frame(payload: bytes, opcode: int = 0x1) -> bytes:
+    first = 0x80 | (opcode & 0x0F)
+    length = len(payload)
+    if length < 126:
+        return bytes([first, length]) + payload
+    if length < 65536:
+        return bytes([first, 126]) + length.to_bytes(2, "big") + payload
+    return bytes([first, 127]) + length.to_bytes(8, "big") + payload
+
+
+def _read_websocket_frame(connection: socket.socket) -> Optional[tuple[int, bytes]]:
+    header = _recv_exact(connection, 2)
+    if not header:
+        return None
+    first, second = header
+    opcode = first & 0x0F
+    length = second & 0x7F
+    if length == 126:
+        length = int.from_bytes(_recv_exact(connection, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(_recv_exact(connection, 8), "big")
+    masked = bool(second & 0x80)
+    mask = _recv_exact(connection, 4) if masked else b""
+    payload = _recv_exact(connection, length)
+    if masked:
+        payload = bytes(value ^ mask[index % 4] for index, value in enumerate(payload))
+    return opcode, payload
+
+
+def _recv_exact(connection: socket.socket, size: int) -> bytes:
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = connection.recv(size - len(chunks))
+        if not chunk:
+            return b""
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
 def make_handler(service: RecognitionService):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path in {"/", "/index.html"}:
                 self._send(HTTPStatus.OK, HTML.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if self.path == "/ws/input":
+                self._handle_websocket()
                 return
             if self.path == "/capture":
                 if not service.settings.evaluation_capture_enabled:
@@ -1305,8 +1986,65 @@ def make_handler(service: RecognitionService):
                 return
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+        def _handle_websocket(self) -> None:
+            if self.headers.get("Upgrade", "").lower() != "websocket":
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "websocket upgrade required"})
+                return
+            key = self.headers.get("Sec-WebSocket-Key")
+            if not key:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing websocket key"})
+                return
+            accept = base64.b64encode(
+                hashlib.sha1(
+                    (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")
+                ).digest()
+            ).decode("ascii")
+            self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", accept)
+            self.end_headers()
+            connection = self.connection
+            service.register_websocket(connection)
+            logger.info("WebSocket client connected")
+            service.start_huion_reader()
+            try:
+                connection.sendall(_websocket_frame(json.dumps(service.websocket_snapshot()).encode()))
+                if os.environ.get("AWP_HUION_DEBUG_TEST", "").strip() == "1":
+                    connection.sendall(
+                        _websocket_frame(
+                            json.dumps({"type": "test_point", "x": 100, "y": 100}).encode()
+                        )
+                    )
+                while True:
+                    frame = _read_websocket_frame(connection)
+                    if frame is None:
+                        break
+                    opcode, payload = frame
+                    if opcode == 0x8:
+                        connection.sendall(_websocket_frame(b"", opcode=0x8))
+                        break
+                    if opcode == 0x9:
+                        connection.sendall(_websocket_frame(payload, opcode=0xA))
+                        continue
+                    if opcode != 0x1:
+                        continue
+                    event = json.loads(payload.decode("utf-8"))
+                    if not isinstance(event, dict):
+                        raise ValueError("websocket event must be an object")
+                    service.ingest_stroke_event(event, source="browser")
+            except (ConnectionError, OSError, json.JSONDecodeError, ValueError):
+                logger.info("WebSocket input client disconnected")
+            finally:
+                service.unregister_websocket(connection)
+
         def do_POST(self) -> None:
-            if self.path not in {"/api/recognize", "/api/correct", "/api/evaluation/cases"}:
+            if self.path not in {
+                "/api/recognize",
+                "/api/correct",
+                "/api/huion/capture",
+                "/api/evaluation/cases",
+            }:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
 
@@ -1317,6 +2055,8 @@ def make_handler(service: RecognitionService):
                     result = service.recognize_payload(payload)
                 elif self.path == "/api/correct":
                     result = service.correct_payload(payload)
+                elif self.path == "/api/huion/capture":
+                    result = service.capture_huion_payload()
                 else:
                     result = service.append_evaluation_case_payload(payload)
             except RecognitionUnavailable as exc:
@@ -1348,6 +2088,7 @@ def make_handler(service: RecognitionService):
 
 
 def run(host: str = "127.0.0.1", port: int = 8000) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     service = RecognitionService()
     service.warm_up_async()
     server = ThreadingHTTPServer((host, port), make_handler(service))
@@ -1356,6 +2097,16 @@ def run(host: str = "127.0.0.1", port: int = 8000) -> None:
         print(f"Evaluation capture running at http://{host}:{port}/capture")
     print("Press Ctrl+C to stop.")
     server.serve_forever()
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
 
 def main() -> None:

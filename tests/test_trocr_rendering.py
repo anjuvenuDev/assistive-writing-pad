@@ -8,6 +8,7 @@ from assistive_writing_pad.recognition.trocr import (
     default_huggingface_cache_dir,
     render_strokes_for_trocr,
 )
+from assistive_writing_pad.recognition.trocr import _preprocess_image
 
 
 def test_trocr_renderer_returns_rgb_numpy_line_image() -> None:
@@ -30,6 +31,15 @@ def test_trocr_renderer_handles_empty_strokes() -> None:
 
     assert image.shape == (_DEFAULT_RENDER_H, _DEFAULT_RENDER_W, 3)
     assert image.min() == 255
+
+
+def test_blank_render_is_rejected_before_ocr() -> None:
+    image = render_strokes_for_trocr([])
+
+    processed, crop, _ = _preprocess_image(image)
+
+    assert crop.valid is False
+    assert processed.shape == image.shape
 
 
 def test_default_trocr_model_prioritizes_base_handwriting_ocr() -> None:

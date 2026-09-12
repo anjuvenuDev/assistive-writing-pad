@@ -96,6 +96,51 @@ class TestAutoCrop:
         assert result.ndim == 3
         assert result.shape[2] == 3
 
+    def test_returns_diagnostics_and_increases_ink_coverage(self) -> None:
+        image = _white_rgb(256, 768)
+        _place_black_rect(image, 80, 180, 150, 620)
+
+        result = auto_crop_handwriting(image)
+
+        assert result.valid is True
+        assert result.original_size == (768, 256)
+        assert result.bbox[0] > 0 and result.bbox[2] < 768
+        assert result.crop_size[0] < 768
+        assert result.ink_coverage > result.original_ink_coverage
+        assert result.image.shape[2] == 3
+
+    def test_rejects_isolated_noise(self) -> None:
+        image = _white_rgb(256, 768)
+        _place_black_rect(image, 120, 380, 123, 383)
+
+        result = auto_crop_handwriting(image)
+
+        assert result.valid is False
+        assert result.ink_pixels == 0
+
+    def test_rgba_transparency_is_composited_as_white(self) -> None:
+        image = np.zeros((100, 200, 4), dtype=np.uint8)
+        image[:, :, :3] = 0
+        image[:, :, 3] = 0
+        image[40:60, 50:150, :3] = 20
+        image[40:60, 50:150, 3] = 255
+
+        result = auto_crop_handwriting(image)
+
+        assert result.valid is True
+        assert result.image.shape[2] == 3
+        assert result.image[:, :, 0].max() == 255
+
+    def test_edge_handwriting_is_not_clipped(self) -> None:
+        image = _white_rgb(100, 200)
+        _place_black_rect(image, 30, 0, 70, 20)
+
+        result = auto_crop_handwriting(image)
+
+        assert result.valid is True
+        assert result.bbox[0] == 0
+        assert result.image[:, :, 0].min() == 0
+
 
 # ---------------------------------------------------------------------------
 # enhance_for_ocr

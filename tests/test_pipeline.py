@@ -86,3 +86,18 @@ def test_pipeline_automatically_selects_best_ocr_hypothesis_before_correction() 
     assert result.recognition.text == "I fed the cat"
     assert result.correction.corrected_text == "I fed the cat"
     assert result.recognition.metadata["selected_ocr_text"] == "I fed the cat"
+
+
+def test_pipeline_preserves_raw_ocr_when_confidence_is_low() -> None:
+    pipeline = WritingPipeline(
+        recognizer=DemoRecognizer(text="nn I loved kWs w", confidence=0.40),
+        corrector=RuleBasedCorrector(),
+    )
+
+    result = pipeline.process_strokes([])
+
+    assert result.recognition.text == "nn I loved kWs w"
+    assert result.correction.original_text == "nn I loved kWs w"
+    assert result.correction.corrected_text == "nn I loved kWs w"
+    assert result.correction.corrections == ()
+    assert result.needs_review is True
