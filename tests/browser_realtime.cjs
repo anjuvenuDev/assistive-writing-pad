@@ -40,8 +40,9 @@ vm.runInContext(code, sandbox);
 const event = (type, extra={}) => sandbox.handleInputEvent({
   type, source: 'huion', coordinate_space: 'normalized', ...extra,
 });
-const result = text => ({ok: true, json: async () => ({
+const result = (text, extra={}) => ({ok: true, json: async () => ({
   recognized_text: text, corrected_text: text, confidence: .9, correction_confidence: 1,
+  ...extra,
 })});
 async function main() {
   event('stroke_start', {x: .1, y: .2});
@@ -66,6 +67,19 @@ async function main() {
   requests[1].resolve(result('cleared text'));
   await second;
   assert.equal(nodes.get('recognized').value, '', 'clear must invalidate outstanding work');
-  console.log('Pad controller: snapshot, auto-trigger, serialization and stale-result tests passed');
+  event('stroke_start', {x: .2, y: .2});
+  event('stroke_end');
+  const third = sandbox.recognize();
+  requests[2].resolve(result('teh cat', {
+    corrected_text: 'the cat',
+    correction_metadata: {
+      stages: JSON.stringify([{stage: 'semantic', accepted: false, alternatives: [{}]}]),
+    },
+    corrections: [{original: 'teh', corrected: 'the', confidence: .9}],
+  }));
+  await third;
+  assert.equal(nodes.get('recognized').value, 'the cat');
+  assert.match(nodes.get('raw-text').textContent, /semantic: checked; no change accepted; 1 candidate/);
+  console.log('Pad controller: snapshot, auto-trigger, stale-result and correction-diagnostic tests passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -929,13 +929,34 @@ HTML = """<!doctype html>
 
     function updateRawDetails(result) {
       const meta = result.metadata || {};
+      const correctionMeta = result.correction_metadata || {};
       const recognizerName = meta.recognizer || "trocr";
       const lineResults = parseJsonArray(meta.line_results);
       const rawLines = lineResults
         .map(l => "Line " + l.line_index + ": " + (l.raw_text || "(empty)"))
         .join("\\n");
       const rawRecognized = result.recognized_text || meta.raw_text || result.text || "(none)";
-      rawTextEl.textContent = "[" + recognizerName + "] " + (rawLines || rawRecognized);
+      const details = ["[" + recognizerName + "] " + (rawLines || rawRecognized)];
+      if (correctionMeta.correction_guardrail) {
+        details.push("Correction skipped: " + correctionMeta.correction_guardrail);
+      }
+      const correctionStages = parseJsonArray(correctionMeta.stages);
+      correctionStages.forEach(stage => {
+        const state = stage.skipped
+          ? "skipped (" + stage.skipped + ")"
+          : stage.output
+            ? "applied"
+            : "checked; no change accepted";
+        const candidates = Array.isArray(stage.alternatives)
+          ? "; " + stage.alternatives.length + " candidate(s)"
+          : "";
+        details.push((stage.stage || "correction") + ": " + state + candidates);
+      });
+      parseJsonArray(correctionMeta.errors).forEach(error => {
+        details.push((error.stage || "correction") + " unavailable: " + (error.error || "unknown error"));
+      });
+      if (result.review_reason) details.push("Review: " + result.review_reason);
+      rawTextEl.textContent = details.join("\\n");
     }
 
     function parseJsonArray(value) {
